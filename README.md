@@ -215,9 +215,13 @@ git push
 GitHub Pages redeploys automatically within a minute. The app's service worker
 picks up new versions on the next load.
 
-> A GitHub Actions workflow is also included at `.github/workflows/pages.yml` if
-> you'd rather build in CI than commit `docs/`. To use it, set **Pages → Source**
-> to **GitHub Actions** instead. You don't need both.
+> **Why there is no CI workflow.** `docs/` is committed already built, so Pages
+> can serve it directly with **Source: Deploy from a branch**. A GitHub Actions
+> workflow would need **Source: GitHub Actions** instead — and if the two are
+> mismatched the run fails with *"Get Pages site failed… verify that the
+> repository has Pages enabled and configured to build using GitHub Actions"*.
+> One method, no ambiguity. Just remember to run `npm run build` before you
+> commit.
 
 ---
 
