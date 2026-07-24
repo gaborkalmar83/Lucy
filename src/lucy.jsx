@@ -3,11 +3,12 @@ function lucySystem(S) {
   const tgt = TARGET_LANGS.find(l=>l.code===S.target);
   const L = S.lucy;
   return `You are Lucy, a warm but direct ${tgt.name} tutor.
-Learner: ${L.name||"(no name)"} · current level ${S.level} · goal ${S.targetLevel} · explanations in ${langName(S.primary)}${S.secondary ? ` · mother tongue / anchor language: ${langName(S.secondary)} — add brief parenthetical analogies to it where a concept maps cleanly` : ""}.
+Learner: ${L.name||"(no name)"} · current level ${S.level} · goal ${S.targetLevel} · explanations in ${langName(S.primary)}${S.secondary ? ` · second explanation language: ${langName(S.secondary)}` : ""}.
 Style: ${L.style} (direct = 1-2 short target-language sentences, minimal small talk; medium = 2-3 warm sentences + one follow-up; chatty = 3-5 expressive sentences).
 Tense focus: ${L.tense} (any = natural; present/past/future = keep conversation anchored there).
 
-LANGUAGE CONTRACT (critical): You ALWAYS converse in ${tgt.name}. All explanations, grammar notes, rule names and translations are written in ${langName(S.primary)}. Never reply only in English unless English is one of these languages.${S.primary===S.target ? " Explanation language equals target language, so you may omit the ' | translation' part." : ""}
+LANGUAGE CONTRACT (critical): You ALWAYS converse in ${tgt.name}. All explanations, grammar notes, rule names and translations are written in ${langName(S.primary)}. Never reply only in English unless English is one of these languages.${S.primary===S.target ? " Explanation language equals target language, so you may omit the ' | translation' part." : ""}${S.secondary ? `
+BILINGUAL EXPLANATIONS ARE MANDATORY: the learner reads both ${langName(S.primary)} and ${langName(S.secondary)}. EVERY grammar explanation, rule statement and correction must appear in BOTH — ${langName(S.primary)} first, then the ${langName(S.secondary)} version on its own line prefixed with "🌐 ". Write the ${langName(S.secondary)} version for a ${langName(S.secondary)} speaker, pointing out where ${langName(S.secondary)} behaves the same or differently — not a word-for-word translation. This is not optional and applies above all when correcting a mistake. Ordinary conversation turns with no explanation in them do not need the 🌐 line.` : ""}
 
 FORMAT RULES:
 - Every ${tgt.name} sentence on its own line, then " | " and its ${langName(S.primary)} translation.
@@ -19,7 +20,8 @@ FORMAT RULES:
 ❌ [what they said]
 ✅ [correct version]
 📚 Regel: [rule name]${S.target==="nl" ? " [[map:rule_id]] if it maps to a known Dutch rule id" : ""}
-🕐 Tijd/vorm: [1-2 sentences why]
+🕐 Tijd/vorm: [1-2 sentences why, in ${langName(S.primary)}]${S.secondary ? `
+🌐 [the rule name AND the same 1-2 sentence explanation in ${langName(S.secondary)} — REQUIRED, never skip this line]` : ""}
 💬 Natiever: [1-2 more natural phrasings]
 
 SPECIAL OUTPUTS:
@@ -42,7 +44,7 @@ const LUCY_ACTIONS = [
   ["nearby","↔️ Nearby tenses","Show the nearby tenses for my last sentence and how the meaning shifts."],
   ["verbday","⭐ Verb of the day","Give me a useful verb for my level: meaning, full present conjugation, and 2 example sentences."],
   ["roleplay","🎭 Roleplay","Start a short roleplay scenario suitable for my level. Set the scene in one line, take a character, and prompt me to respond."],
-  ["cloze","✏️ Cloze drill","Give me 3 fill-in-the-blank sentences on our current grammar point. Show blanks as ___ and put the answer key at the very bottom under 'KEY:'."],
+  ["cloze","✏️ Fill the gaps","Give me 3 fill-in-the-blank sentences on our current grammar point. Show blanks as ___ and put the answer key at the very bottom under 'KEY:'."],
   ["vocab","🗂️ Vocab tip","Give me 3 vocabulary items for our current topic: word | meaning, each on its own line."],
   ["newTopic","🆕 New topic","Let's switch to a new topic — pick one suitable for my level and introduce it."],
   ["recap","📋 Recap","Give me a session recap: topics covered, my mistakes with the rules + corrections, my strengths, and what to focus on next."]
@@ -134,10 +136,15 @@ function LucyMsg({ m, S, onSave, onOpenNode }) {
         out.push(<div key={i} style={{ margin:"4px 0", padding:"8px 10px", background:T.panel2, borderRadius:8 }}><Tokens tokens={toks} size={15} /></div>); return; }
       catch(e){}
     }
-    if (/^[✏️❌✅📚🕐💬]/.test(trimmed)) {
+    if (/^[✏️❌✅📚🕐💬🌐]/.test(trimmed)) {
       const bad = trimmed.startsWith("❌"), good = trimmed.startsWith("✅");
-      out.push(<div key={i} style={{ fontSize:13, padding:"3px 9px", margin:"1px 0", borderLeft:`3px solid ${bad?T.bad:good?T.good:T.accent}`,
-        color: bad?T.bad:good?T.good:T.mute, background: bad?T.badBg:good?T.goodBg:"transparent", borderRadius:4 }}>{renderMd(trimmed)}</div>); return;
+      // 🌐 is the second-language restatement — same block, quieter styling so
+      // it reads as a companion to the line above rather than a new point.
+      const alt = trimmed.startsWith("🌐");
+      out.push(<div key={i} style={{ fontSize: alt?12.5:13, padding:"3px 9px", margin:"1px 0",
+        borderLeft:`3px solid ${bad?T.bad:good?T.good:alt?T.faint:T.accent}`,
+        color: bad?T.bad:good?T.good:alt?T.faint:T.mute, fontStyle: alt?"italic":"normal",
+        background: bad?T.badBg:good?T.goodBg:"transparent", borderRadius:4 }}>{renderMd(trimmed)}</div>); return;
     }
     const h = trimmed.match(/^(#{1,4})\s+(.*)/);
     if (h) { out.push(<div key={i} style={{ fontSize:15, fontWeight:800, color:T.text, margin:"8px 0 2px" }}>{renderMd(h[2])}</div>); return; }

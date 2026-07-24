@@ -231,15 +231,44 @@ function Settings({ S, setS, onClose }) {
   const T = React.useContext(ThemeCtx);
   const voices = useVoices();
   const prov = PROVIDERS.find(p => p.id === S.provider);
-  const [orModels, setOrModels] = React.useState([]);
+  // Seed from cache so the dropdown is already correct on first render.
+  const [orModels, setOrModels] = React.useState(() => (loadORCache() || {}).list || []);
   const [orLoading, setOrLoading] = React.useState(false);
   const [orErr, setOrErr] = React.useState(null);
-  const loadOR = async () => {
+  const loadOR = async (keepModel) => {
     setOrLoading(true); setOrErr(null);
-    try { const list = await fetchORModels(); setOrModels(list);
-      const first = list.find(m => m.tier === S.orTier); if (first) setS({ ...S, model:first.id });
+    try {
+      const list = await fetchORModels();
+      setOrModels(list); saveORCache(list);
+      // Only pick a default when the saved model is gone from the catalogue —
+      // refreshing the list must never silently change the user's choice.
+      const stillValid = list.some(m => m.id === S.model);
+      if (!keepModel && !stillValid) {
+        const first = list.find(m => m.tier === S.orTier) || list[0];
+        if (first) setS({ ...S, model:first.id });
+      }
     } catch(e){ setOrErr(e.message); }
     setOrLoading(false);
+  };
+  // Refresh in the background when the catalogue is missing or over a day old.
+  React.useEffect(() => {
+    if (S.provider !== "openrouter") return;
+    const c = loadORCache();
+    if (!c || !c.list.length || Date.now() - c.ts > 864e5) loadOR(true);
+  }, [S.provider]);
+
+  const [azModels, setAzModels] = React.useState([]);
+  const [azLoading, setAzLoading] = React.useState(false);
+  const [azErr, setAzErr] = React.useState(null);
+  const loadAzure = async () => {
+    setAzLoading(true); setAzErr(null);
+    try {
+      const list = await fetchAzureDeployments(S);
+      setAzModels(list);
+      if (list.length && !list.some(d => d.id === S.azureDeployment)) setS({ ...S, azureDeployment:list[0].id });
+      if (!list.length) setAzErr("No deployments found on this resource.");
+    } catch(e){ setAzErr(e.message); }
+    setAzLoading(false);
   };
   const inp ={ width:"100%", padding:"8px 11px", fontSize:13, borderRadius:8, border:`1px solid ${T.border}`, background:T.panel2, color:T.text, outline:"none", fontFamily:"'JetBrains Mono',monospace" };
   const inp2 = { padding:"4px 7px", fontSize:12, borderRadius:6, border:`1px solid ${T.border}`, background:T.panel2, color:T.text, outline:"none" };
@@ -300,31 +329,88 @@ function Settings({ S, setS, onClose }) {
         )}
         {S.provider === "openrouter" && (() => {
           const filtered = orModels.filter(m => m.tier === S.orTier);
+          const chosen = orModels.find(m => m.id === S.model);
+          // The saved model is always an option, even when it sits outside the
+          // selected tier — a <select> whose value matches no option renders
+          // its first entry instead, which is what made saved settings look lost.
+          const opts = filtered.length ? filtered : PROVIDERS.find(p => p.id === "openrouter").models.map(id => ({ id, name:id }));
+          const withCurrent = S.model && !opts.some(m => m.id === S.model)
+            ? [chosen || { id:S.model, name:S.model }, ...opts] : opts;
           return (
             <Field label={UI.modelLbl + " — OpenRouter"}>
               <div style={{ display:"flex", gap:5, marginBottom:8 }}>
                 {OR_TIERS.map(([id,l]) => (
-                  <button key={id} onClick={() => { const f = orModels.find(m=>m.tier===id); setS({ ...S, orTier:id, ...(f?{model:f.id}:{}) }); }}
+                  <button key={id} onClick={() => setS({ ...S, orTier:id })}
                     style={{ flex:1, padding:"5px 6px", fontSize:11, fontWeight:700, borderRadius:7, cursor:"pointer",
                       border:`1px solid ${S.orTier===id ? T.accent : T.border}`, background: S.orTier===id ? T.accent+"22" : "transparent", color:T.text }}>{l}</button>
                 ))}
               </div>
               <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-                <button onClick={loadOR} disabled={orLoading} style={{ padding:"7px 12px", fontSize:12, fontWeight:700, borderRadius:8,
+                <button onClick={() => loadOR(false)} disabled={orLoading} style={{ padding:"7px 12px", fontSize:12, fontWeight:700, borderRadius:8,
                   border:"none", background: orLoading?T.chip:T.accent, color: orLoading?T.mute:T.accentText, cursor: orLoading?"wait":"pointer", whiteSpace:"nowrap" }}>
                   {orLoading ? "…" : (orModels.length ? "↻ Reload" : "⬇ Load models")}</button>
                 <span style={{ fontSize:11, color:T.faint, alignSelf:"center" }}>{orModels.length ? filtered.length + " / " + orModels.length : "live catalogue"}</span>
               </div>
               {orErr && <div style={{ fontSize:11, color:T.bad, marginBottom:8 }}>{orErr}</div>}
               <select value={S.model} onChange={e => setS({ ...S, model:e.target.value })} style={inp}>
-                {filtered.length ? filtered.map(m => (
-                  <option key={m.id} value={m.id}>{m.name} {m.free ? "· free" : "· $"+m.inP.toFixed(2)+"/M"}</option>
-                )) : PROVIDERS.find(p=>p.id==="openrouter").models.map(m => <option key={m} value={m}>{m}</option>)}
+                {withCurrent.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}{m.free ? " · free" : typeof m.inP === "number" ? " · $"+m.inP.toFixed(2)+"/M" : ""}
+                    {m.id === S.model && !filtered.some(f => f.id === m.id) ? "  (saved)" : ""}
+                  </option>
+                ))}
               </select>
-              {!orModels.length && <div style={{ fontSize:10.5, color:T.faint, marginTop:6 }}>Click “Load models” to fetch the current free/paid catalogue live from OpenRouter.</div>}
+              <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>
+                {S.model ? <React.Fragment>Using <b style={{ color:T.mute }}>{S.model}</b>. </React.Fragment> : null}
+                Tiers filter the list; your saved model stays selected either way.
+              </div>
             </Field>
           );
         })()}
+        {S.provider === "azure" && (
+          <React.Fragment>
+            <Field label="Endpoint (Azure AI Foundry / Azure OpenAI)">
+              <input value={S.azureEndpoint} onChange={e => setS({ ...S, azureEndpoint:e.target.value })}
+                placeholder="https://my-resource.openai.azure.com" style={inp} />
+            </Field>
+            <Field label={UI.apiKey + " (Azure)"}>
+              <input type="password" value={S.azureKey} onChange={e => setS({ ...S, azureKey:e.target.value })}
+                placeholder="your Azure API key" style={inp} />
+            </Field>
+            <Field label="Deployment">
+              <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                <button onClick={loadAzure} disabled={azLoading || !S.azureKey || !S.azureEndpoint}
+                  style={{ padding:"7px 12px", fontSize:12, fontWeight:700, borderRadius:8, border:"none", whiteSpace:"nowrap",
+                    background: (azLoading || !S.azureKey || !S.azureEndpoint) ? T.chip : T.accent,
+                    color: (azLoading || !S.azureKey || !S.azureEndpoint) ? T.mute : T.accentText,
+                    cursor: azLoading ? "wait" : "pointer" }}>
+                  {azLoading ? "…" : (azModels.length ? "↻ Reload" : "⬇ Load deployments")}</button>
+                <span style={{ fontSize:11, color:T.faint, alignSelf:"center" }}>
+                  {azModels.length ? azModels.length + " found" : "reads your resource"}</span>
+              </div>
+              {azErr && <div style={{ fontSize:11, color:T.bad, marginBottom:8 }}>{azErr}</div>}
+              {azModels.length ? (
+                <select value={S.azureDeployment} onChange={e => setS({ ...S, azureDeployment:e.target.value })} style={inp}>
+                  {!azModels.some(d => d.id === S.azureDeployment) && S.azureDeployment &&
+                    <option value={S.azureDeployment}>{S.azureDeployment}  (saved)</option>}
+                  {azModels.map(d => <option key={d.id} value={d.id}>{d.id}{d.model ? " · " + d.model : ""}</option>)}
+                </select>
+              ) : (
+                <input value={S.azureDeployment} onChange={e => setS({ ...S, azureDeployment:e.target.value })}
+                  placeholder="gpt-4o  (your deployment name)" style={inp} />
+              )}
+            </Field>
+            <Field label="API version">
+              <input value={S.azureApiVersion} onChange={e => setS({ ...S, azureApiVersion:e.target.value })}
+                placeholder="2024-10-21" style={inp} />
+            </Field>
+            <div style={{ fontSize:10.5, color:T.faint, marginTop:-6, marginBottom:12, lineHeight:1.5 }}>
+              Use the <b>deployment name</b> you gave the model in Azure, not the model name — they often differ.
+              If loading fails, your resource may block browser origins; add this site under
+              CORS / allowed origins in the Azure portal.
+            </div>
+          </React.Fragment>
+        )}
         {S.provider === "anthropic" && <Field label={UI.apiKey + " (Anthropic)"}><input type="password" value={S.anthropicKey} onChange={e => setS({ ...S, anthropicKey:e.target.value })} placeholder="sk-ant-…" style={inp} /></Field>}
         {S.provider === "openai" && <Field label={UI.apiKey + " (OpenAI)"}><input type="password" value={S.openaiKey} onChange={e => setS({ ...S, openaiKey:e.target.value })} placeholder="sk-…" style={inp} /></Field>}
         {S.provider === "openrouter" && <Field label={UI.apiKey + " (OpenRouter)"}><input type="password" value={S.openrouterKey} onChange={e => setS({ ...S, openrouterKey:e.target.value })} placeholder="sk-or-…" style={inp} /></Field>}

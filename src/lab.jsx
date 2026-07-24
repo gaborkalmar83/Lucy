@@ -25,16 +25,20 @@ function SentenceLab({ S, input, setInput, onOpenNode }) {
     if (!input.trim() || busy) return;
     setBusy(true); setError(null); setResult(null);
     try {
-      const expl = langName(S.primary) + (S.secondary ? ` (add a one-line note in ${langName(S.secondary)} where an analogy helps)` : "");
+      const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
       const catalog = isNl ? `RULE CATALOG (cite these ids):\n${buildRuleCatalog()}\n\n` : "";
-      const sys = `You are a ${tgt.name} grammar checker for a learner. Explanations in ${expl}.
+      // With a second explanation language set, every explanatory field is
+      // required in BOTH languages — not "where an analogy helps", which the
+      // model reads as optional and skips almost every time.
+      const sys = `You are a ${tgt.name} grammar checker for a learner. Explanations in ${p1}.
 ${isNl ? "You get a rule catalog with ids — only cite ids from it." : "Name rules concisely (id = short slug you invent, e.g. 'v2-word-order')."}
 Respond ONLY with valid JSON, no fences:
 {"verdict":"correct"|"errors"|"not_target_language","corrected":"…","tokens":[["word","role"],…],
-"applied":[{"id":"…","label":"rule name","note":"how it's correctly applied"}],
-"violated":[{"id":"…","label":"rule name","note":"what went wrong + fix"}],
-"explanation":"2-3 sentences"}
-roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x. Pick 3-6 relevant applied rules; list every real violation.`;
+"applied":[{"id":"…","label":"rule name","note":"how it's correctly applied"${p2 ? `,"note2":"same note in ${p2}"` : ""}}],
+"violated":[{"id":"…","label":"rule name","note":"what went wrong + fix"${p2 ? `,"note2":"same note in ${p2}"` : ""}}],
+"explanation":"2-3 sentences"${p2 ? `,"explanation2":"the same 2-3 sentences in ${p2}"` : ""}}
+roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x. Pick 3-6 relevant applied rules; list every real violation.${p2 ? `
+BILINGUAL OUTPUT IS MANDATORY: the learner reads ${p1} and ${p2}. Every "note" MUST have a matching "note2", and "explanation" MUST have "explanation2". Write the ${p2} version as a real explanation for a ${p2} speaker — not a word-for-word translation — and mention where ${p2} works the same way or differently. Never omit a "note2", never leave one empty, above all on violated rules.` : ""}`;
       const { text } = await llmCall(S, { system: sys, maxTokens: 2000,
         messages: [{ role:"user", content: catalog + "SENTENCE: " + input.trim() }] });
       const m = text.match(/\{[\s\S]*\}/);
@@ -61,6 +65,12 @@ roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x. Pick 3-6 r
           <div style={{ fontSize:12.5, fontWeight:700, color: ok ? T.good : T.bad, fontFamily:"'JetBrains Mono',monospace" }}>
             {label}{entry ? " ↗" : ""}</div>
           <div style={{ fontSize:12.5, color:T.mute, marginTop:3, lineHeight:1.5 }}>{item.note}</div>
+          {item.note2 && (
+            <div style={{ fontSize:12, color:T.faint, marginTop:4, lineHeight:1.5, fontStyle:"italic",
+              borderTop:`1px dashed ${T.border}`, paddingTop:4 }}>
+              {item.note2}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -113,6 +123,12 @@ roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x. Pick 3-6 r
               <div style={{ marginTop:2 }}><SpeakBtn text={input.trim()} S={S} size={14} /></div>
             )}
             <div style={{ fontSize:13, color:T.mute, marginTop:10, lineHeight:1.6 }}>{result.explanation}</div>
+            {result.explanation2 && (
+              <div style={{ fontSize:12.5, color:T.faint, marginTop:7, lineHeight:1.6, fontStyle:"italic",
+                borderTop:`1px dashed ${T.border}`, paddingTop:7 }}>
+                {result.explanation2}
+              </div>
+            )}
           </div>
           {result.violated?.length > 0 && (
             <div>

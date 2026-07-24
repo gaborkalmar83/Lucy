@@ -84,6 +84,7 @@ const DEFAULT_SETTINGS = {
   level:"A2", targetLevel:"B2", showRoles:true,
   provider:"builtin", model:"claude-sonnet-4-5", orTier:"free",
   anthropicKey:"", openaiKey:"", openrouterKey:"", localUrl:"http://localhost:11434/v1", localModel:"",
+  azureKey:"", azureEndpoint:"", azureDeployment:"", azureApiVersion:"2024-10-21",
   lucy:{ name:"", style:"direct", tense:"any" },
   // ── added in v3 ──
   speak:{ auto:false, rate:0.9, voice:"" },   // text-to-speech
@@ -105,8 +106,28 @@ const PROVIDERS = [
   { id:"anthropic",  name:"Anthropic API",  models:["claude-sonnet-4-5","claude-haiku-4-5","claude-opus-4-1"] },
   { id:"openai",     name:"OpenAI API",     models:["gpt-4o","gpt-4o-mini","gpt-4.1","gpt-4.1-mini"] },
   { id:"openrouter", name:"OpenRouter",     models:["meta-llama/llama-3.3-70b-instruct:free","google/gemini-2.0-flash-exp:free","mistralai/mistral-small-3.1-24b-instruct:free","anthropic/claude-sonnet-4.5"] },
+  { id:"azure",      name:"Azure AI Foundry / Azure OpenAI", models:[] },
   { id:"local",      name:"Local LLM (OpenAI-compatible)", models:[] }
 ];
+
+// Azure endpoints get pasted in every shape going ("…azure.com", with a trailing
+// slash, or already including /openai). Normalise to the bare resource origin.
+function azureBase(endpoint) {
+  return String(endpoint || "").trim().replace(/\/+$/, "").replace(/\/openai(\/v1)?$/, "");
+}
+// Azure's data-plane deployment list — the same key that runs completions can
+// read it, so "add key → see your models" works without ARM credentials.
+async function fetchAzureDeployments(S) {
+  const base = azureBase(S.azureEndpoint);
+  if (!base) throw new Error("Set the endpoint URL first");
+  if (!S.azureKey) throw new Error("Set the API key first");
+  const res = await fetch(base + "/openai/deployments?api-version=2023-03-15-preview",
+    { headers: { "api-key": S.azureKey } });
+  if (!res.ok) throw new Error("Azure " + res.status + ": " + (await res.text()).slice(0,160));
+  const j = await res.json();
+  return (j.data || []).map(d => ({ id: d.id || d.name, model: (d.model || d.id || "") }))
+    .filter(d => d.id).sort((a,b) => a.id.localeCompare(b.id));
+}
 
 // Fetch the live OpenRouter catalogue (public, no key needed) → normalized list with a size/price tier
 async function fetchORModels() {
@@ -126,6 +147,22 @@ async function fetchORModels() {
   }).sort((a,b) => a.inP - b.inP || a.name.localeCompare(b.name));
 }
 const OR_TIERS = [["free","Free"],["small","Small ¢"],["medium","Medium $"],["large","Large $$$"]];
+
+// The catalogue is cached so the model dropdown is correct on the very first
+// render after a reload. Without it the list is empty until you press "Load
+// models", and a saved model that isn't in the small fallback list makes the
+// <select> fall back to showing its first option — i.e. silently displaying a
+// different model from the one actually saved.
+const OR_CACHE_KEY = "lm3:orModels";
+function loadORCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(OR_CACHE_KEY) || "null");
+    return c && Array.isArray(c.list) ? c : null;
+  } catch(e){ return null; }
+}
+function saveORCache(list) {
+  try { localStorage.setItem(OR_CACHE_KEY, JSON.stringify({ ts:Date.now(), list })); } catch(e){}
+}
 const USAGE = { in:0, out:0, calls:0, last:"", subs:new Set() };
 const estTok = (s) => Math.ceil((s||"").length/4);
 function bumpUsage(inTok, outTok, label){ USAGE.in+=inTok; USAGE.out+=outTok; USAGE.calls++; USAGE.last=label; USAGE.subs.forEach(f=>f()); }
@@ -144,6 +181,7 @@ function providerReady(S) {
     case "anthropic":  return !!S.anthropicKey;
     case "openai":     return !!S.openaiKey;
     case "openrouter": return !!S.openrouterKey;
+    case "azure":      return !!(S.azureKey && S.azureEndpoint && S.azureDeployment);
     case "local":      return !!S.localUrl;
     default:           return false;
   }
@@ -151,7 +189,8 @@ function providerReady(S) {
 
 // unified LLM call → { text }
 async function llmCall(S, { system, messages, maxTokens=2000 }) {
-  const label = S.provider + " · " + (S.provider==="local" ? (S.localModel||"local") : S.model);
+  const label = S.provider + " · " + (S.provider==="local" ? (S.localModel||"local")
+    : S.provider==="azure" ? (S.azureDeployment||"azure") : S.model);
   const inEst = estTok(system) + estTok(messages.map(m=>m.content).join(" "));
   if (S.provider === "builtin") {
     if (!builtinAvailable()) throw new Error(UI.builtinMissing);
@@ -166,6 +205,15 @@ async function llmCall(S, { system, messages, maxTokens=2000 }) {
     body = { model:S.model, max_tokens:maxTokens, system, messages };
     extract = j => j.content.map(b=>b.text||"").join("");
     usageOf = j => j.usage ? [j.usage.input_tokens, j.usage.output_tokens] : null;
+  } else if (S.provider === "azure") {
+    // The deployment name is part of the path and the key rides in `api-key`,
+    // not an Authorization header — otherwise it is the OpenAI wire format.
+    url = azureBase(S.azureEndpoint) + "/openai/deployments/" + encodeURIComponent(S.azureDeployment)
+        + "/chat/completions?api-version=" + encodeURIComponent(S.azureApiVersion || "2024-10-21");
+    headers = { "content-type":"application/json", "api-key":S.azureKey };
+    body = { max_tokens:maxTokens, messages: [{ role:"system", content:system }, ...messages] };
+    extract = j => j.choices[0].message.content;
+    usageOf = j => j.usage ? [j.usage.prompt_tokens, j.usage.completion_tokens] : null;
   } else {
     url = S.provider==="openai" ? "https://api.openai.com/v1/chat/completions"
         : S.provider==="openrouter" ? "https://openrouter.ai/api/v1/chat/completions"
@@ -205,7 +253,7 @@ const UI_STRINGS = {
     lucyIntro:"Lucy is your conversational tutor — corrections with rules, conjugations, tense comparisons, recaps. Just start typing.",
     lucyBtns:{ explainLast:"🔍 Explain last", example:"💡 Example", flip:"🔄 Ask me", simpler:"🐢 Simpler", harder:"🔥 Harder",
       annotate:"🎨 Annotate", deepDive:"📚 Deep dive", conj:"📊 Conjugate", timelines:"🕰️ Timelines", nearby:"↔️ Nearby tenses",
-      verbday:"⭐ Verb of the day", roleplay:"🎭 Roleplay", cloze:"✏️ Cloze drill", vocab:"🗂️ Vocab tip", newTopic:"🆕 New topic", recap:"📋 Recap" }
+      verbday:"⭐ Verb of the day", roleplay:"🎭 Roleplay", cloze:"✏️ Fill the gaps", vocab:"🗂️ Vocab tip", newTopic:"🆕 New topic", recap:"📋 Recap" }
   },
   hu: {
     map:"Nyelvtani térkép", lab:"Mondatlabor", lucy:"Lucy", search:"Keresés szabályok, példák közt…", all:"mind",
@@ -223,7 +271,7 @@ const UI_STRINGS = {
     lucyIntro:"Lucy a beszélgetős tanárod — javítások szabályokkal, ragozások, igeidő-összevetések, összefoglalók. Csak kezdj el írni.",
     lucyBtns:{ explainLast:"🔍 Utolsó elemzése", example:"💡 Példa", flip:"🔄 Kérdezz", simpler:"🐢 Egyszerűbben", harder:"🔥 Nehezebben",
       annotate:"🎨 Jelölés", deepDive:"📚 Mélymerülés", conj:"📊 Ragozás", timelines:"🕰️ Idősíkok", nearby:"↔️ Közeli igeidők",
-      verbday:"⭐ A nap igéje", roleplay:"🎭 Szerepjáték", cloze:"✏️ Kiegészítés", vocab:"🗂️ Szótipp", newTopic:"🆕 Új téma", recap:"📋 Összefoglaló" }
+      verbday:"⭐ A nap igéje", roleplay:"🎭 Szerepjáték", cloze:"✏️ Hiányzó szavak", vocab:"🗂️ Szótipp", newTopic:"🆕 Új téma", recap:"📋 Összefoglaló" }
   },
   de: {
     map:"Grammatikkarte", lab:"Satzlabor", lucy:"Lucy", search:"Regeln, Beispiele suchen…", all:"alle",
@@ -241,7 +289,7 @@ const UI_STRINGS = {
     lucyIntro:"Lucy ist deine Gesprächstutorin — Korrekturen mit Regeln, Konjugationen, Zeitvergleiche, Zusammenfassungen. Fang einfach an zu tippen.",
     lucyBtns:{ explainLast:"🔍 Letztes erklären", example:"💡 Beispiel", flip:"🔄 Frag mich", simpler:"🐢 Einfacher", harder:"🔥 Schwerer",
       annotate:"🎨 Markieren", deepDive:"📚 Vertiefen", conj:"📊 Konjugieren", timelines:"🕰️ Zeitachsen", nearby:"↔️ Nahe Zeiten",
-      verbday:"⭐ Verb des Tages", roleplay:"🎭 Rollenspiel", cloze:"✏️ Lückentext", vocab:"🗂️ Vokabeltipp", newTopic:"🆕 Neues Thema", recap:"📋 Rückblick" }
+      verbday:"⭐ Verb des Tages", roleplay:"🎭 Rollenspiel", cloze:"✏️ Lücken füllen", vocab:"🗂️ Vokabeltipp", newTopic:"🆕 Neues Thema", recap:"📋 Rückblick" }
   },
   fr: {
     map:"Carte grammaticale", lab:"Labo de phrases", lucy:"Lucy", search:"Rechercher règles, exemples…", all:"tout",
@@ -259,7 +307,7 @@ const UI_STRINGS = {
     lucyIntro:"Lucy est ta tutrice conversationnelle — corrections avec règles, conjugaisons, comparaisons de temps, récapitulatifs. Commence à écrire.",
     lucyBtns:{ explainLast:"🔍 Expliquer", example:"💡 Exemple", flip:"🔄 Interroge-moi", simpler:"🐢 Plus simple", harder:"🔥 Plus dur",
       annotate:"🎨 Annoter", deepDive:"📚 Approfondir", conj:"📊 Conjuguer", timelines:"🕰️ Chronologies", nearby:"↔️ Temps voisins",
-      verbday:"⭐ Verbe du jour", roleplay:"🎭 Jeu de rôle", cloze:"✏️ Texte à trous", vocab:"🗂️ Astuce vocab", newTopic:"🆕 Nouveau sujet", recap:"📋 Récap" }
+      verbday:"⭐ Verbe du jour", roleplay:"🎭 Jeu de rôle", cloze:"✏️ Textes à trous", vocab:"🗂️ Astuce vocab", newTopic:"🆕 Nouveau sujet", recap:"📋 Récap" }
   },
   es: {
     map:"Mapa gramatical", lab:"Laboratorio de frases", lucy:"Lucy", search:"Buscar reglas, ejemplos…", all:"todo",
@@ -295,7 +343,7 @@ const UI_STRINGS = {
     lucyIntro:"Lucy è la tua tutor conversazionale — correzioni con regole, coniugazioni, confronti tra tempi, riepiloghi. Inizia a scrivere.",
     lucyBtns:{ explainLast:"🔍 Spiega", example:"💡 Esempio", flip:"🔄 Interrogami", simpler:"🐢 Più semplice", harder:"🔥 Più difficile",
       annotate:"🎨 Annota", deepDive:"📚 Approfondisci", conj:"📊 Coniuga", timelines:"🕰️ Linee temporali", nearby:"↔️ Tempi vicini",
-      verbday:"⭐ Verbo del giorno", roleplay:"🎭 Gioco di ruolo", cloze:"✏️ Completa", vocab:"🗂️ Consiglio lessico", newTopic:"🆕 Nuovo tema", recap:"📋 Riepilogo" }
+      verbday:"⭐ Verbo del giorno", roleplay:"🎭 Gioco di ruolo", cloze:"✏️ Riempi gli spazi", vocab:"🗂️ Consiglio lessico", newTopic:"🆕 Nuovo tema", recap:"📋 Riepilogo" }
   },
   pt: {
     map:"Mapa gramatical", lab:"Laboratório de frases", lucy:"Lucy", search:"Pesquisar regras, exemplos…", all:"tudo",
@@ -367,7 +415,7 @@ const UI_STRINGS = {
     lucyIntro:"Lucy is je gesprekstutor — correcties met regels, vervoegingen, tijdvergelijkingen, samenvattingen. Begin gewoon te typen.",
     lucyBtns:{ explainLast:"🔍 Leg laatste uit", example:"💡 Voorbeeld", flip:"🔄 Vraag mij", simpler:"🐢 Eenvoudiger", harder:"🔥 Moeilijker",
       annotate:"🎨 Annoteer", deepDive:"📚 Verdiep", conj:"📊 Vervoeg", timelines:"🕰️ Tijdlijnen", nearby:"↔️ Nabije tijden",
-      verbday:"⭐ Werkwoord van de dag", roleplay:"🎭 Rollenspel", cloze:"✏️ Invuloefening", vocab:"🗂️ Woordtip", newTopic:"🆕 Nieuw onderwerp", recap:"📋 Samenvatting" }
+      verbday:"⭐ Werkwoord van de dag", roleplay:"🎭 Rollenspel", cloze:"✏️ Vul de gaten in", vocab:"🗂️ Woordtip", newTopic:"🆕 Nieuw onderwerp", recap:"📋 Samenvatting" }
   }
 };
 // ── v3 strings for the new views. Any language may omit keys — applyLang layers
@@ -495,4 +543,4 @@ function LevelBadge({ level }) {
 
 Object.assign(window, { CLUSTERS, NODE_INDEX, LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName,
   ROLES, roleMeaning, CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
-  USAGE, useUsage, llmCall, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });
+  USAGE, useUsage, llmCall, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });
