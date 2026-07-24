@@ -4,6 +4,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import zlib from 'zlib';
 import * as babel from '@babel/core';
 import { minify } from 'terser';
 
@@ -120,6 +121,76 @@ const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 <path d="M351 208 Q 310 292 272 292" stroke="#475569" stroke-width="8" fill="none" stroke-dasharray="14 12"/>
 </svg>`;
 
+// ── Minimal PNG writer ───────────────────────────────────────────────────────
+// Chrome on Android is happiest installing a PWA when the manifest offers real
+// PNG icons at 192/512. Rasterising the SVG would mean pulling in a rendering
+// dependency, so the icon — flat rounded rectangles — is drawn directly instead.
+function crc32(buf) {
+  let c, crc = 0xffffffff;
+  for (let n = 0; n < buf.length; n++) {
+    c = (crc ^ buf[n]) & 0xff;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crc = c ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function chunk(type, data) {
+  const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+  const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+  return Buffer.concat([len, td, crc]);
+}
+function pngFromRGBA(w, h, rgba) {
+  const raw = Buffer.alloc((w * 4 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 4 + 1)] = 0;                                     // filter: none
+    rgba.copy(raw, y * (w * 4 + 1) + 1, y * w * 4, (y + 1) * w * 4);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;  // 8-bit RGBA
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
+    chunk('IEND', Buffer.alloc(0))
+  ]);
+}
+function drawIcon(size) {
+  const px = Buffer.alloc(size * size * 4);
+  const S = size / 512;                                    // design grid is 512
+  const hex = (s) => [parseInt(s.slice(1,3),16), parseInt(s.slice(3,5),16), parseInt(s.slice(5,7),16)];
+  const set = (x, y, [r,g,b]) => { const i = (y*size+x)*4; px[i]=r; px[i+1]=g; px[i+2]=b; px[i+3]=255; };
+  // A rounded rect, filled or stroked, in design-grid coordinates.
+  const rrect = (x0, y0, w, h, rad, color, strokeW) => {
+    const c = hex(color);
+    const X0=x0*S, Y0=y0*S, W=w*S, H=h*S, R=rad*S, SW=(strokeW||0)*S;
+    for (let y = Math.max(0,Math.floor(Y0)); y < Math.min(size,Math.ceil(Y0+H)); y++) {
+      for (let x = Math.max(0,Math.floor(X0)); x < Math.min(size,Math.ceil(X0+W)); x++) {
+        const dx = Math.max(X0+R-x, 0, x-(X0+W-R));
+        const dy = Math.max(Y0+R-y, 0, y-(Y0+H-R));
+        const d = Math.hypot(dx, dy);
+        if (d > R) continue;                                        // outside corner
+        if (SW) {                                                   // stroke only
+          const ix = x-(X0+SW), iy = y-(Y0+SW), iw = W-2*SW, ih = H-2*SW, ir = Math.max(R-SW,0);
+          const idx = Math.max(ir-ix, 0, ix-(iw-ir)), idy = Math.max(ir-iy, 0, iy-(ih-ir));
+          const inside = ix>=0 && iy>=0 && ix<iw && iy<ih && Math.hypot(idx,idy)<=ir;
+          if (inside) continue;
+        }
+        set(x, y, c);
+      }
+    }
+  };
+  rrect(0, 0, 512, 512, 96, '#020617');
+  rrect(96, 112, 130, 96, 16, '#0f172a');
+  rrect(96, 112, 130, 96, 16, '#38bdf8', 8);
+  rrect(286, 112, 130, 96, 16, '#0f172a');
+  rrect(286, 112, 130, 96, 16, '#f59e0b', 8);
+  rrect(191, 292, 130, 96, 16, '#0f172a');
+  rrect(191, 292, 130, 96, 16, '#2dd4bf', 8);
+  return pngFromRGBA(size, size, px);
+}
+
 async function main() {
   fs.mkdirSync(path.join(OUT, 'assets'), { recursive: true });
   const js = await bundle();
@@ -129,6 +200,8 @@ async function main() {
   fs.writeFileSync(path.join(OUT, 'assets', 'app.js'), js);
   fs.writeFileSync(path.join(OUT, 'assets', 'app.css'), fontCss + '\n' + BASE_CSS);
   fs.writeFileSync(path.join(OUT, 'assets', 'icon.svg'), ICON_SVG);
+  fs.writeFileSync(path.join(OUT, 'assets', 'icon-192.png'), drawIcon(192));
+  fs.writeFileSync(path.join(OUT, 'assets', 'icon-512.png'), drawIcon(512));
   fs.writeFileSync(path.join(OUT, 'assets', 'sw-register.js'),
     `if('serviceWorker' in navigator){addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}\n`);
   fs.writeFileSync(path.join(OUT, 'index.html'), shell({ standalone: false }));
@@ -140,7 +213,12 @@ async function main() {
     start_url: './', scope: './', display: 'standalone',
     background_color: '#020617', theme_color: '#020617', orientation: 'any',
     categories: ['education', 'productivity'],
-    icons: [{ src: 'assets/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+    icons: [
+      { src: 'assets/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: 'assets/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: 'assets/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: 'assets/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }
+    ],
     shortcuts: [
       { name: 'Review', url: './#/review' },
       { name: 'Lucy', url: './#/lucy' },
@@ -151,7 +229,8 @@ async function main() {
   // Precache list: everything needed to run with no network.
   const fonts = fs.readdirSync(path.join(OUT, 'assets', 'fonts')).map(f => 'assets/fonts/' + f);
   const precache = ['./', 'index.html', `assets/app.js?v=${VERSION}`, `assets/app.css?v=${VERSION}`,
-    `assets/sw-register.js?v=${VERSION}`, 'assets/icon.svg', 'manifest.webmanifest',
+    `assets/sw-register.js?v=${VERSION}`, 'assets/icon.svg',
+    'assets/icon-192.png', 'assets/icon-512.png', 'manifest.webmanifest',
     'vendor/react.production.min.js', 'vendor/react-dom.production.min.js', ...fonts];
   fs.writeFileSync(path.join(OUT, 'sw.js'), swSource(VERSION, precache));
 
