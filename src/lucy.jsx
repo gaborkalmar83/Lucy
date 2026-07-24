@@ -42,7 +42,7 @@ const LUCY_ACTIONS = [
   ["nearby","↔️ Nearby tenses","Show the nearby tenses for my last sentence and how the meaning shifts."],
   ["verbday","⭐ Verb of the day","Give me a useful verb for my level: meaning, full present conjugation, and 2 example sentences."],
   ["roleplay","🎭 Roleplay","Start a short roleplay scenario suitable for my level. Set the scene in one line, take a character, and prompt me to respond."],
-  ["cloze","✏️ Cloze drill","Give me 3 fill-in-the-blank sentences on our current grammar point. Show blanks as ___ and put the answer key at the very bottom under 'KEY:'."],
+  ["cloze","✏️ Fill the gaps","Give me 3 fill-in-the-blank sentences on our current grammar point. Show blanks as ___ and put the answer key at the very bottom under 'KEY:'."],
   ["vocab","🗂️ Vocab tip","Give me 3 vocabulary items for our current topic: word | meaning, each on its own line."],
   ["newTopic","🆕 New topic","Let's switch to a new topic — pick one suitable for my level and introduce it."],
   ["recap","📋 Recap","Give me a session recap: topics covered, my mistakes with the rules + corrections, my strengths, and what to focus on next."]

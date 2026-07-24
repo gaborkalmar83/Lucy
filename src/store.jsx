@@ -162,7 +162,7 @@ const masteryOf = (r) => { if (!r || (r.ok + r.bad) === 0) return null; return r
 
 // ── Backup / restore ─────────────────────────────────────────────────────────
 const BACKUP_KEYS = Object.values(KEYS);
-const SECRET_FIELDS = ["anthropicKey", "openaiKey", "openrouterKey"];
+const SECRET_FIELDS = ["anthropicKey", "openaiKey", "openrouterKey", "azureKey"];
 
 // A backup is meant to be carried between devices (phone ↔ laptop) and is easy
 // to end up in cloud storage or a chat. API keys are therefore stripped unless
