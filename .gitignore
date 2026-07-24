@@ -1,3 +1,6 @@
 node_modules/
 *.log
 .DS_Store
+
+# Personal, machine-specific Claude Code settings (may contain local paths)
+.claude/settings.local.json

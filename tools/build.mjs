@@ -44,24 +44,36 @@ function require_preset() {
 const VERSION = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 
 function shell({ inlineJs, inlineCss, fontCss, standalone }) {
+  // connect-src has to stay open: the whole point is that you choose the model
+  // endpoint, including a local one on your own network. Everything else that
+  // could execute code is locked to this origin.
+  const CSP = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",   // React writes inline style attributes
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src *",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "form-action 'none'"
+  ].join('; ');
   const head = standalone
     ? `<style>${fontCss}\n${inlineCss}</style>`
-    : `<link rel="stylesheet" href="assets/app.css?v=${VERSION}">
+    : `<meta http-equiv="Content-Security-Policy" content="${CSP}">
+  <link rel="stylesheet" href="assets/app.css?v=${VERSION}">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="assets/icon-180.png">`;
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">`;
   const scripts = standalone
     ? `<script>${fs.readFileSync(path.join(OUT, 'vendor', 'react.production.min.js'), 'utf8')}</script>
 <script>${fs.readFileSync(path.join(OUT, 'vendor', 'react-dom.production.min.js'), 'utf8')}</script>
 <script>${inlineJs}</script>`
+    // No inline script on the hosted build, so script-src can stay 'self' —
+    // an injected <script> tag has nothing to execute under that policy.
     : `<script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="assets/app.js?v=${VERSION}"></script>
-<script>
-if ('serviceWorker' in navigator) {
-  addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
-}
-</script>`;
+<script src="assets/sw-register.js?v=${VERSION}"></script>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -117,6 +129,8 @@ async function main() {
   fs.writeFileSync(path.join(OUT, 'assets', 'app.js'), js);
   fs.writeFileSync(path.join(OUT, 'assets', 'app.css'), fontCss + '\n' + BASE_CSS);
   fs.writeFileSync(path.join(OUT, 'assets', 'icon.svg'), ICON_SVG);
+  fs.writeFileSync(path.join(OUT, 'assets', 'sw-register.js'),
+    `if('serviceWorker' in navigator){addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}\n`);
   fs.writeFileSync(path.join(OUT, 'index.html'), shell({ standalone: false }));
   fs.writeFileSync(path.join(OUT, '404.html'), shell({ standalone: false })); // SPA fallback on Pages
   fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
@@ -137,7 +151,7 @@ async function main() {
   // Precache list: everything needed to run with no network.
   const fonts = fs.readdirSync(path.join(OUT, 'assets', 'fonts')).map(f => 'assets/fonts/' + f);
   const precache = ['./', 'index.html', `assets/app.js?v=${VERSION}`, `assets/app.css?v=${VERSION}`,
-    'assets/icon.svg', 'manifest.webmanifest',
+    `assets/sw-register.js?v=${VERSION}`, 'assets/icon.svg', 'manifest.webmanifest',
     'vendor/react.production.min.js', 'vendor/react-dom.production.min.js', ...fonts];
   fs.writeFileSync(path.join(OUT, 'sw.js'), swSource(VERSION, precache));
 

@@ -162,21 +162,43 @@ const masteryOf = (r) => { if (!r || (r.ok + r.bad) === 0) return null; return r
 
 // ── Backup / restore ─────────────────────────────────────────────────────────
 const BACKUP_KEYS = Object.values(KEYS);
-function exportAll() {
-  const data = { _app:"linguamap", _version:3, _exported:new Date().toISOString() };
+const SECRET_FIELDS = ["anthropicKey", "openaiKey", "openrouterKey"];
+
+// A backup is meant to be carried between devices (phone ↔ laptop) and is easy
+// to end up in cloud storage or a chat. API keys are therefore stripped unless
+// the user explicitly opts in, so the common path can never leak a credential.
+function exportAll(includeKeys) {
+  const data = { _app:"linguamap", _version:3, _exported:new Date().toISOString(), _keysIncluded: !!includeKeys };
   BACKUP_KEYS.forEach(k => { const v = localStorage.getItem(k); if (v != null) data[k] = v; });
+  if (!includeKeys && typeof data[KEYS.settings] === "string") {
+    try {
+      const s = JSON.parse(data[KEYS.settings]);
+      SECRET_FIELDS.forEach(f => { if (s[f]) s[f] = ""; });
+      data[KEYS.settings] = JSON.stringify(s);
+    } catch(e) { delete data[KEYS.settings]; }   // unparseable → drop rather than risk it
+  }
   return data;
 }
+// Importing without keys must not wipe the keys already on this device.
 function importAll(obj) {
   if (!obj || obj._app !== "linguamap") throw new Error("Not a LinguaMap backup file");
+  let existing = {};
+  try { existing = JSON.parse(localStorage.getItem(KEYS.settings) || "{}"); } catch(e){}
   BACKUP_KEYS.forEach(k => { if (typeof obj[k] === "string") localStorage.setItem(k, obj[k]); });
+  if (!obj._keysIncluded && typeof obj[KEYS.settings] === "string") {
+    try {
+      const s = JSON.parse(localStorage.getItem(KEYS.settings) || "{}");
+      SECRET_FIELDS.forEach(f => { if (!s[f] && existing[f]) s[f] = existing[f]; });
+      localStorage.setItem(KEYS.settings, JSON.stringify(s));
+    } catch(e){}
+  }
   return true;
 }
-function downloadBackup() {
-  const blob = new Blob([JSON.stringify(exportAll(), null, 2)], { type:"application/json" });
+function downloadBackup(includeKeys) {
+  const blob = new Blob([JSON.stringify(exportAll(includeKeys), null, 2)], { type:"application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "linguamap-backup-" + todayKey() + ".json";
+  a.download = "linguamap-backup-" + todayKey() + (includeKeys ? "-with-keys" : "") + ".json";
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }

@@ -373,8 +373,11 @@ function Settings({ S, setS, onClose }) {
 
         <Field label={"💾 " + UI.backup}>
           <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
-            <button onClick={downloadBackup} style={{ padding:"8px 13px", fontSize:12, borderRadius:8,
+            <button onClick={() => downloadBackup(false)} style={{ padding:"8px 13px", fontSize:12, borderRadius:8,
               border:`1px solid ${T.border}`, background:T.panel2, color:T.text, cursor:"pointer" }}>⬇ {UI.exportAll}</button>
+            <button onClick={() => { if (confirm(UI.exportKeysWarn)) downloadBackup(true); }}
+              title={UI.exportKeysWarn} style={{ padding:"8px 13px", fontSize:12, borderRadius:8,
+                border:`1px solid ${T.border}`, background:"transparent", color:T.faint, cursor:"pointer" }}>⬇ + 🔑</button>
             <label style={{ padding:"8px 13px", fontSize:12, borderRadius:8, border:`1px solid ${T.border}`,
               background:T.panel2, color:T.text, cursor:"pointer" }}>
               ⬆ {UI.importAll}
@@ -391,7 +394,7 @@ function Settings({ S, setS, onClose }) {
                 background:"transparent", color:T.bad, cursor:"pointer" }}>{UI.clearAll}</button>
           </div>
           <div style={{ fontSize:10.5, color:T.faint, marginTop:7, lineHeight:1.5 }}>
-            Your vocabulary, review schedule and progress live in this browser only. Export before switching device or clearing site data.
+            {UI.backupNote}
           </div>
         </Field>
 
