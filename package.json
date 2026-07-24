@@ -1,0 +1,20 @@
+{
+  "name": "linguamap",
+  "version": "3.0.0",
+  "description": "Grammar map, sentence lab, AI tutor and spaced repetition for European languages.",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "node tools/build.mjs --dev",
+    "start": "npx --yes serve docs -l 4173"
+  },
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/preset-react": "^8.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "terser": "^5.49.0"
+  },
+  "private": true
+}

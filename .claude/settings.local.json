@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/gabor/Downloads/**)",
+      "Bash(awk '{print NR\": \"length\\($0\\)}' \"Dutch Grammar Studio \\(standalone\\).html\")",
+      "Bash(sort -t: -k2 -rn)",
+      "Bash(node tools/build.mjs)",
+      "Bash(node -e ' *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git -c user.name=Claude -c user.email=noreply@anthropic.com commit -q -m ' *)"
+    ]
+  }
+}

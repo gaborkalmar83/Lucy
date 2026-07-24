@@ -1,0 +1,492 @@
+// Dutch Grammar Studio v2 — core: themes, languages, roles, i18n, LLM providers, usage tracking
+const CLUSTERS = [...window.GRAM_CLUSTERS_A, ...window.GRAM_CLUSTERS_B, ...window.GRAM_CLUSTERS_C];
+const NODE_INDEX = {};
+CLUSTERS.forEach(c => c.nodes.forEach(n => { NODE_INDEX[n.id] = { node: n, cluster: c }; }));
+
+const LEVELS = ["A1","A2","B1","B2","C1"];
+const LEVEL_COLOR = { A1:"#34d399", A2:"#84cc16", B1:"#f59e0b", B2:"#f43f5e", C1:"#38bdf8" };
+const CEFR_ALL = ["A1","A2","A2+","B1","B1+","B2","C1","C2"];
+
+// Target languages (flag + name). Dutch has full grammar-map data; others work in Lab + Lucy via LLM.
+const TARGET_LANGS = [
+  { code:"nl", flag:"🇳🇱", name:"Dutch",      native:"Nederlands", hasMap:true },
+  { code:"de", flag:"🇩🇪", name:"German",     native:"Deutsch" },
+  { code:"fr", flag:"🇫🇷", name:"French",     native:"Français" },
+  { code:"es", flag:"🇪🇸", name:"Spanish",    native:"Español" },
+  { code:"it", flag:"🇮🇹", name:"Italian",    native:"Italiano" },
+  { code:"pt", flag:"🇵🇹", name:"Portuguese", native:"Português" },
+  { code:"sv", flag:"🇸🇪", name:"Swedish",    native:"Svenska" },
+  { code:"da", flag:"🇩🇰", name:"Danish",     native:"Dansk" },
+  { code:"no", flag:"🇳🇴", name:"Norwegian",  native:"Norsk" },
+  { code:"pl", flag:"🇵🇱", name:"Polish",     native:"Polski" },
+  { code:"cs", flag:"🇨🇿", name:"Czech",      native:"Čeština" },
+  { code:"hu", flag:"🇭🇺", name:"Hungarian",  native:"Magyar" },
+  { code:"fi", flag:"🇫🇮", name:"Finnish",    native:"Suomi" },
+  { code:"el", flag:"🇬🇷", name:"Greek",      native:"Ελληνικά" }
+];
+const EXPLAIN_LANGS = [
+  { code:"en", flag:"🇬🇧", name:"English" }, { code:"hu", flag:"🇭🇺", name:"Hungarian" },
+  { code:"de", flag:"🇩🇪", name:"German" }, { code:"fr", flag:"🇫🇷", name:"French" },
+  { code:"es", flag:"🇪🇸", name:"Spanish" }, { code:"it", flag:"🇮🇹", name:"Italian" },
+  { code:"pt", flag:"🇵🇹", name:"Portuguese" }, { code:"pl", flag:"🇵🇱", name:"Polish" },
+  { code:"sv", flag:"🇸🇪", name:"Swedish" }, { code:"nl", flag:"🇳🇱", name:"Dutch" }
+];
+const langName = (code) => (EXPLAIN_LANGS.find(l=>l.code===code) || TARGET_LANGS.find(l=>l.code===code) || {name:code}).name;
+
+// Word roles: color + NL grammatical term + meanings. NO purple/violet anywhere.
+const ROLES = {
+  s:    { nl:"onderwerp",              en:"subject",        hu:"alany",              color:"#60a5fa" },
+  vfin: { nl:"persoonsvorm",           en:"finite verb",    hu:"ragozott ige",       color:"#ef4444" },
+  vinf: { nl:"infinitief / deelwoord", en:"non-finite verb",hu:"nem ragozott ige",   color:"#f97316" },
+  v:    { nl:"werkwoord",              en:"verb",           hu:"ige",                color:"#ef4444" },
+  o:    { nl:"lijdend voorwerp",       en:"direct object",  hu:"tárgy",              color:"#22c55e" },
+  io:   { nl:"meewerkend voorwerp",    en:"indirect obj.",  hu:"részeshatározó",     color:"#14b8a6" },
+  prep: { nl:"voorzetsel",             en:"preposition",    hu:"elöljáró",           color:"#eab308" },
+  neg:  { nl:"ontkenning",             en:"negation",       hu:"tagadás",            color:"#ec4899" },
+  conn: { nl:"voegwoord",              en:"conjunction",    hu:"kötőszó",            color:"#06b6d4" },
+  adv:  { nl:"bepaling (tijd/plaats)", en:"adverbial",      hu:"határozó",           color:"#fde047" },
+  refl: { nl:"wederkerend vnw.",       en:"reflexive",      hu:"visszaható",         color:"#fda4af" },
+  part: { nl:"partikel / te",          en:"particle",       hu:"igekötő / te",       color:"#fb7185" },
+  art:  { nl:"lidwoord",               en:"article",        hu:"névelő",             color:"#94a3b8" },
+  q:    { nl:"vraagwoord",             en:"question word",  hu:"kérdőszó",           color:"#f59e0b" },
+  pron: { nl:"voornaamwoord",          en:"pronoun",        hu:"névmás",             color:"#7dd3fc" },
+  adj:  { nl:"bijvoeglijk nw.",        en:"adjective",      hu:"melléknév",          color:"#a3e635" },
+  x:    { nl:"", en:"", hu:"", color:"" }
+};
+const roleMeaning = (r, code) => r[code] || r.en;
+
+const CLUSTER_HUES = { amber:"#f59e0b", indigo:"#38bdf8", teal:"#2dd4bf", rose:"#fb7185" };
+
+// ── Themes (no purple) ──
+const THEMES = {
+  night: { name:"Night", dark:true,  bg:"#020617", bgGrad:"radial-gradient(1100px 480px at 50% -100px, #0c4a6e33, transparent)",
+    panel:"#0f172a", panel2:"#0b1120", chip:"#1e293b", border:"#1e293b", text:"#f1f5f9", mute:"#94a3b8", faint:"#64748b",
+    accent:"#0ea5e9", accentText:"#ffffff", good:"#4ade80", goodBg:"#052e1a", goodBd:"#14532d", bad:"#f87171", badBg:"#3b0a12", badBd:"#7f1d1d",
+    whyBg:"#082f49", whyBd:"#0369a166", whyTitle:"#7dd3fc", whyText:"#bae6fd" },
+  day: { name:"Day", dark:false, bg:"#f5f7fa", bgGrad:"radial-gradient(1100px 480px at 50% -100px, #bae6fd44, transparent)",
+    panel:"#ffffff", panel2:"#eef2f7", chip:"#e2e8f0", border:"#d7dee8", text:"#0f172a", mute:"#475569", faint:"#64748b",
+    accent:"#0284c7", accentText:"#ffffff", good:"#15803d", goodBg:"#f0fdf4", goodBd:"#bbf7d0", bad:"#b91c1c", badBg:"#fef2f2", badBd:"#fecaca",
+    whyBg:"#f0f9ff", whyBd:"#bae6fd", whyTitle:"#0369a1", whyText:"#075985" },
+  paper: { name:"Paper", dark:false, bg:"#f6f1e7", bgGrad:"none",
+    panel:"#fffdf7", panel2:"#efe8d8", chip:"#e8e0cd", border:"#ddd3bc", text:"#292018", mute:"#6b5d4b", faint:"#8a7a63",
+    accent:"#b45309", accentText:"#ffffff", good:"#3f6212", goodBg:"#f7fee7", goodBd:"#d9f99d", bad:"#9f1239", badBg:"#fff1f2", badBd:"#fecdd3",
+    whyBg:"#fef3c7", whyBd:"#fde68a", whyTitle:"#92400e", whyText:"#78350f" },
+  deep: { name:"Deep Sea", dark:true, bg:"#04211f", bgGrad:"radial-gradient(1100px 480px at 50% -100px, #0f766e33, transparent)",
+    panel:"#062e2b", panel2:"#041d1b", chip:"#0d4340", border:"#134e4a", text:"#ecfdf5", mute:"#8dd6c6", faint:"#5eaa9a",
+    accent:"#14b8a6", accentText:"#022c26", good:"#4ade80", goodBg:"#052e1a", goodBd:"#14532d", bad:"#fb7185", badBg:"#3b0a12", badBd:"#7f1d1d",
+    whyBg:"#042f2e", whyBd:"#0f766e", whyTitle:"#5eead4", whyText:"#99f6e4" }
+};
+const ThemeCtx = React.createContext(THEMES.night);
+
+// ── Settings + LLM providers ──
+const DEFAULT_SETTINGS = {
+  theme:"night", target:"nl", primary:"en", secondary:"", // secondary explanation lang ("" = off)
+  level:"A2", targetLevel:"B2", showRoles:true,
+  provider:"builtin", model:"claude-sonnet-4-5", orTier:"free",
+  anthropicKey:"", openaiKey:"", openrouterKey:"", localUrl:"http://localhost:11434/v1", localModel:"",
+  lucy:{ name:"", style:"direct", tense:"any" },
+  // ── added in v3 ──
+  speak:{ auto:false, rate:0.9, voice:"" },   // text-to-speech
+  dailyGoal:20,                                // SRS cards/day
+  reduceMotion:false
+};
+function loadSettings(){
+  try {
+    const saved = JSON.parse(localStorage.getItem("dgs2")||"{}");
+    return { ...DEFAULT_SETTINGS, ...saved,
+      lucy:{ ...DEFAULT_SETTINGS.lucy, ...(saved.lucy||{}) },
+      speak:{ ...DEFAULT_SETTINGS.speak, ...(saved.speak||{}) } };
+  } catch(e){ return { ...DEFAULT_SETTINGS }; }
+}
+function saveSettings(s){ try { localStorage.setItem("dgs2", JSON.stringify(s)); } catch(e){} }
+
+const PROVIDERS = [
+  { id:"builtin",    name:"Built-in Claude (no key)", models:["claude-sonnet-4-5","claude-haiku-4-5"] },
+  { id:"anthropic",  name:"Anthropic API",  models:["claude-sonnet-4-5","claude-haiku-4-5","claude-opus-4-1"] },
+  { id:"openai",     name:"OpenAI API",     models:["gpt-4o","gpt-4o-mini","gpt-4.1","gpt-4.1-mini"] },
+  { id:"openrouter", name:"OpenRouter",     models:["meta-llama/llama-3.3-70b-instruct:free","google/gemini-2.0-flash-exp:free","mistralai/mistral-small-3.1-24b-instruct:free","anthropic/claude-sonnet-4.5"] },
+  { id:"local",      name:"Local LLM (OpenAI-compatible)", models:[] }
+];
+
+// Fetch the live OpenRouter catalogue (public, no key needed) → normalized list with a size/price tier
+async function fetchORModels() {
+  const res = await fetch("https://openrouter.ai/api/v1/models");
+  if (!res.ok) throw new Error("OpenRouter " + res.status);
+  const j = await res.json();
+  return (j.data || []).map(m => {
+    const inP = parseFloat(m.pricing && m.pricing.prompt || "0") * 1e6;  // $ per 1M input tokens
+    const outP = parseFloat(m.pricing && m.pricing.completion || "0") * 1e6;
+    const free = inP === 0 && outP === 0;
+    let tier;
+    if (free) tier = "free";
+    else if (inP < 0.5) tier = "small";
+    else if (inP < 4) tier = "medium";
+    else tier = "large";
+    return { id: m.id, name: m.name || m.id, ctx: m.context_length || 0, inP, outP, free, tier };
+  }).sort((a,b) => a.inP - b.inP || a.name.localeCompare(b.name));
+}
+const OR_TIERS = [["free","Free"],["small","Small ¢"],["medium","Medium $"],["large","Large $$$"]];
+const USAGE = { in:0, out:0, calls:0, last:"", subs:new Set() };
+const estTok = (s) => Math.ceil((s||"").length/4);
+function bumpUsage(inTok, outTok, label){ USAGE.in+=inTok; USAGE.out+=outTok; USAGE.calls++; USAGE.last=label; USAGE.subs.forEach(f=>f()); }
+function useUsage(){ const [,f] = React.useReducer(x=>x+1,0);
+  React.useEffect(() => { USAGE.subs.add(f); return () => USAGE.subs.delete(f); }, []); return USAGE; }
+
+// The zero-config "built-in Claude" provider only exists inside the Claude
+// artifact host. On GitHub Pages or a file:// copy it is absent, so the app has
+// to say so plainly instead of throwing "cannot read properties of undefined".
+const builtinAvailable = () => typeof window.claude === "object" && window.claude !== null && typeof window.claude.complete === "function";
+
+// Is the selected provider actually usable right now?
+function providerReady(S) {
+  switch (S.provider) {
+    case "builtin":    return builtinAvailable();
+    case "anthropic":  return !!S.anthropicKey;
+    case "openai":     return !!S.openaiKey;
+    case "openrouter": return !!S.openrouterKey;
+    case "local":      return !!S.localUrl;
+    default:           return false;
+  }
+}
+
+// unified LLM call → { text }
+async function llmCall(S, { system, messages, maxTokens=2000 }) {
+  const label = S.provider + " · " + (S.provider==="local" ? (S.localModel||"local") : S.model);
+  const inEst = estTok(system) + estTok(messages.map(m=>m.content).join(" "));
+  if (S.provider === "builtin") {
+    if (!builtinAvailable()) throw new Error(UI.builtinMissing);
+    const text = await window.claude.complete({ model:S.model, max_tokens:maxTokens, system, messages });
+    bumpUsage(inEst, estTok(text), label);
+    return { text };
+  }
+  let url, headers, body, extract, usageOf;
+  if (S.provider === "anthropic") {
+    url = "https://api.anthropic.com/v1/messages";
+    headers = { "content-type":"application/json", "x-api-key":S.anthropicKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" };
+    body = { model:S.model, max_tokens:maxTokens, system, messages };
+    extract = j => j.content.map(b=>b.text||"").join("");
+    usageOf = j => j.usage ? [j.usage.input_tokens, j.usage.output_tokens] : null;
+  } else {
+    url = S.provider==="openai" ? "https://api.openai.com/v1/chat/completions"
+        : S.provider==="openrouter" ? "https://openrouter.ai/api/v1/chat/completions"
+        : (S.localUrl.replace(/\/$/,"") + "/chat/completions");
+    const key = S.provider==="openai" ? S.openaiKey : S.provider==="openrouter" ? S.openrouterKey : "";
+    headers = { "content-type":"application/json", ...(key ? { authorization:"Bearer "+key } : {}) };
+    body = { model: S.provider==="local" ? (S.localModel||"default") : S.model, max_tokens:maxTokens,
+      messages: [{ role:"system", content:system }, ...messages] };
+    extract = j => j.choices[0].message.content;
+    usageOf = j => j.usage ? [j.usage.prompt_tokens, j.usage.completion_tokens] : null;
+  }
+  const res = await fetch(url, { method:"POST", headers, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error("API " + res.status + ": " + (await res.text()).slice(0,200));
+  const j = await res.json();
+  const text = extract(j);
+  const u = usageOf(j);
+  bumpUsage(u ? u[0] : inEst, u ? u[1] : estTok(text), label);
+  return { text };
+}
+
+// ── UI strings — interface chrome localizes to the primary explanation language ──
+const LUCY_BTN_KEYS = ["explainLast","example","flip","simpler","harder","annotate","deepDive","conj","timelines","nearby","verbday","roleplay","cloze","vocab","newTopic","recap"];
+const UI_STRINGS = {
+  en: {
+    map:"Grammar Map", lab:"Sentence Lab", lucy:"Lucy", search:"Search rules, examples…", all:"all",
+    examples:"Examples", exceptions:"Exceptions & pitfalls", why:"Why this rule exists", related:"Related",
+    analyzeTitle:"Sentence Lab", analyzeHint:"Type a sentence in your target language (or an attempt). The model checks which rules apply — green = correct, red = violated.",
+    analyzeBtn:"Analyze", analyzing:"Analyzing…", correct:"APPLIED CORRECTLY", wrong:"VIOLATED / MISSING",
+    verdict:"VERDICT", corrected:"Corrected", tryEx:"Try:", errFail:"Analysis failed — check provider settings and try again.",
+    exception:"EXCEPTION", settings:"Settings", provider:"Provider", modelLbl:"Model", apiKey:"API key", baseUrl:"Base URL",
+    theme:"Theme", close:"Close", learning:"Learning", explainIn:"Explain in", secondary:"Secondary", none:"none",
+    mapOnlyNl:"The curated grammar map currently covers Dutch. For this language, use the Sentence Lab and Lucy — the map is on the roadmap.",
+    tokens:"tokens", roles:"Word roles", send:"Send", lucyPlaceholder:"Write in your target language (or your own)…",
+    level:"Level", targetLevel:"Goal", style:"Style", tenseFocus:"Tense", name:"Name",
+    rolesOn:"Roles on", rolesOff:"Roles off", saveSession:"Save session", reset:"Reset", startSession:"Start session",
+    target:"Target language", noLlm:"no LLM calls yet", keyNote:"Keys are stored only in your browser (localStorage). Built-in Claude needs no key but only works in the hosted app. Custom providers call directly from your browser.",
+    lucyIntro:"Lucy is your conversational tutor — corrections with rules, conjugations, tense comparisons, recaps. Just start typing.",
+    lucyBtns:{ explainLast:"🔍 Explain last", example:"💡 Example", flip:"🔄 Ask me", simpler:"🐢 Simpler", harder:"🔥 Harder",
+      annotate:"🎨 Annotate", deepDive:"📚 Deep dive", conj:"📊 Conjugate", timelines:"🕰️ Timelines", nearby:"↔️ Nearby tenses",
+      verbday:"⭐ Verb of the day", roleplay:"🎭 Roleplay", cloze:"✏️ Cloze drill", vocab:"🗂️ Vocab tip", newTopic:"🆕 New topic", recap:"📋 Recap" }
+  },
+  hu: {
+    map:"Nyelvtani térkép", lab:"Mondatlabor", lucy:"Lucy", search:"Keresés szabályok, példák közt…", all:"mind",
+    examples:"Példák", exceptions:"Kivételek és buktatók", why:"Miért létezik ez a szabály", related:"Kapcsolódó",
+    analyzeTitle:"Mondatlabor", analyzeHint:"Írj be egy mondatot a célnyelveden (vagy egy próbálkozást). A modell megmutatja, mely szabályok érvényesülnek — zöld = helyes, piros = hibás.",
+    analyzeBtn:"Elemzés", analyzing:"Elemzés…", correct:"HELYESEN ALKALMAZVA", wrong:"MEGSÉRTVE / HIÁNYZIK",
+    verdict:"ÍTÉLET", corrected:"Javítva", tryEx:"Próbáld:", errFail:"Az elemzés nem sikerült — ellenőrizd a szolgáltató beállításait, és próbáld újra.",
+    exception:"KIVÉTEL", settings:"Beállítások", provider:"Szolgáltató", modelLbl:"Modell", apiKey:"API kulcs", baseUrl:"Alap URL",
+    theme:"Téma", close:"Bezár", learning:"Tanulás", explainIn:"Magyarázat nyelve", secondary:"Másodlagos", none:"nincs",
+    mapOnlyNl:"A szerkesztett nyelvtani térkép jelenleg a hollandot fedi le. Ehhez a nyelvhez használd a Mondatlabort és Lucyt — a térkép fejlesztés alatt.",
+    tokens:"token", roles:"Szófaji szerepek", send:"Küldés", lucyPlaceholder:"Írj a célnyelveden (vagy a sajátodon)…",
+    level:"Szint", targetLevel:"Cél", style:"Stílus", tenseFocus:"Igeidő", name:"Név",
+    rolesOn:"Szerepek be", rolesOff:"Szerepek ki", saveSession:"Munkamenet mentése", reset:"Alaphelyzet", startSession:"Munkamenet indítása",
+    target:"Célnyelv", noLlm:"még nincs LLM-hívás", keyNote:"A kulcsok csak a böngésződben tárolódnak (localStorage). A beépített Claude nem igényel kulcsot, de csak a hosztolt appban működik. Az egyéni szolgáltatók közvetlenül a böngésződből hívódnak.",
+    lucyIntro:"Lucy a beszélgetős tanárod — javítások szabályokkal, ragozások, igeidő-összevetések, összefoglalók. Csak kezdj el írni.",
+    lucyBtns:{ explainLast:"🔍 Utolsó elemzése", example:"💡 Példa", flip:"🔄 Kérdezz", simpler:"🐢 Egyszerűbben", harder:"🔥 Nehezebben",
+      annotate:"🎨 Jelölés", deepDive:"📚 Mélymerülés", conj:"📊 Ragozás", timelines:"🕰️ Idősíkok", nearby:"↔️ Közeli igeidők",
+      verbday:"⭐ A nap igéje", roleplay:"🎭 Szerepjáték", cloze:"✏️ Kiegészítés", vocab:"🗂️ Szótipp", newTopic:"🆕 Új téma", recap:"📋 Összefoglaló" }
+  },
+  de: {
+    map:"Grammatikkarte", lab:"Satzlabor", lucy:"Lucy", search:"Regeln, Beispiele suchen…", all:"alle",
+    examples:"Beispiele", exceptions:"Ausnahmen & Fallstricke", why:"Warum diese Regel existiert", related:"Verwandt",
+    analyzeTitle:"Satzlabor", analyzeHint:"Gib einen Satz in deiner Zielsprache ein (oder einen Versuch). Das Modell prüft, welche Regeln gelten — grün = richtig, rot = verletzt.",
+    analyzeBtn:"Analysieren", analyzing:"Analysiere…", correct:"RICHTIG ANGEWENDET", wrong:"VERLETZT / FEHLT",
+    verdict:"URTEIL", corrected:"Korrigiert", tryEx:"Versuch:", errFail:"Analyse fehlgeschlagen — prüfe die Anbietereinstellungen und versuche es erneut.",
+    exception:"AUSNAHME", settings:"Einstellungen", provider:"Anbieter", modelLbl:"Modell", apiKey:"API-Schlüssel", baseUrl:"Basis-URL",
+    theme:"Design", close:"Schließen", learning:"Lernen", explainIn:"Erklären auf", secondary:"Zweitsprache", none:"keine",
+    mapOnlyNl:"Die kuratierte Grammatikkarte deckt derzeit Niederländisch ab. Nutze für diese Sprache das Satzlabor und Lucy — die Karte ist geplant.",
+    tokens:"Tokens", roles:"Wortrollen", send:"Senden", lucyPlaceholder:"Schreibe in deiner Zielsprache (oder deiner eigenen)…",
+    level:"Niveau", targetLevel:"Ziel", style:"Stil", tenseFocus:"Zeitform", name:"Name",
+    rolesOn:"Rollen an", rolesOff:"Rollen aus", saveSession:"Sitzung speichern", reset:"Zurücksetzen", startSession:"Sitzung starten",
+    target:"Zielsprache", noLlm:"noch keine LLM-Aufrufe", keyNote:"Schlüssel werden nur in deinem Browser gespeichert (localStorage). Built-in Claude braucht keinen Schlüssel, funktioniert aber nur in der gehosteten App.",
+    lucyIntro:"Lucy ist deine Gesprächstutorin — Korrekturen mit Regeln, Konjugationen, Zeitvergleiche, Zusammenfassungen. Fang einfach an zu tippen.",
+    lucyBtns:{ explainLast:"🔍 Letztes erklären", example:"💡 Beispiel", flip:"🔄 Frag mich", simpler:"🐢 Einfacher", harder:"🔥 Schwerer",
+      annotate:"🎨 Markieren", deepDive:"📚 Vertiefen", conj:"📊 Konjugieren", timelines:"🕰️ Zeitachsen", nearby:"↔️ Nahe Zeiten",
+      verbday:"⭐ Verb des Tages", roleplay:"🎭 Rollenspiel", cloze:"✏️ Lückentext", vocab:"🗂️ Vokabeltipp", newTopic:"🆕 Neues Thema", recap:"📋 Rückblick" }
+  },
+  fr: {
+    map:"Carte grammaticale", lab:"Labo de phrases", lucy:"Lucy", search:"Rechercher règles, exemples…", all:"tout",
+    examples:"Exemples", exceptions:"Exceptions & pièges", why:"Pourquoi cette règle existe", related:"Liés",
+    analyzeTitle:"Labo de phrases", analyzeHint:"Écris une phrase dans ta langue cible (ou un essai). Le modèle vérifie quelles règles s'appliquent — vert = correct, rouge = enfreint.",
+    analyzeBtn:"Analyser", analyzing:"Analyse…", correct:"CORRECTEMENT APPLIQUÉ", wrong:"ENFREINT / MANQUANT",
+    verdict:"VERDICT", corrected:"Corrigé", tryEx:"Essaie :", errFail:"Échec de l'analyse — vérifie les réglages du fournisseur et réessaie.",
+    exception:"EXCEPTION", settings:"Réglages", provider:"Fournisseur", modelLbl:"Modèle", apiKey:"Clé API", baseUrl:"URL de base",
+    theme:"Thème", close:"Fermer", learning:"Apprentissage", explainIn:"Expliquer en", secondary:"Secondaire", none:"aucune",
+    mapOnlyNl:"La carte grammaticale couvre actuellement le néerlandais. Pour cette langue, utilise le Labo de phrases et Lucy — la carte est prévue.",
+    tokens:"tokens", roles:"Rôles des mots", send:"Envoyer", lucyPlaceholder:"Écris dans ta langue cible (ou la tienne)…",
+    level:"Niveau", targetLevel:"Objectif", style:"Style", tenseFocus:"Temps", name:"Nom",
+    rolesOn:"Rôles activés", rolesOff:"Rôles désactivés", saveSession:"Enregistrer la session", reset:"Réinitialiser", startSession:"Démarrer la session",
+    target:"Langue cible", noLlm:"aucun appel LLM", keyNote:"Les clés sont stockées uniquement dans ton navigateur (localStorage). Claude intégré ne nécessite pas de clé mais ne marche que dans l'app hébergée.",
+    lucyIntro:"Lucy est ta tutrice conversationnelle — corrections avec règles, conjugaisons, comparaisons de temps, récapitulatifs. Commence à écrire.",
+    lucyBtns:{ explainLast:"🔍 Expliquer", example:"💡 Exemple", flip:"🔄 Interroge-moi", simpler:"🐢 Plus simple", harder:"🔥 Plus dur",
+      annotate:"🎨 Annoter", deepDive:"📚 Approfondir", conj:"📊 Conjuguer", timelines:"🕰️ Chronologies", nearby:"↔️ Temps voisins",
+      verbday:"⭐ Verbe du jour", roleplay:"🎭 Jeu de rôle", cloze:"✏️ Texte à trous", vocab:"🗂️ Astuce vocab", newTopic:"🆕 Nouveau sujet", recap:"📋 Récap" }
+  },
+  es: {
+    map:"Mapa gramatical", lab:"Laboratorio de frases", lucy:"Lucy", search:"Buscar reglas, ejemplos…", all:"todo",
+    examples:"Ejemplos", exceptions:"Excepciones y trampas", why:"Por qué existe esta regla", related:"Relacionado",
+    analyzeTitle:"Laboratorio de frases", analyzeHint:"Escribe una frase en tu idioma meta (o un intento). El modelo comprueba qué reglas se aplican — verde = correcto, rojo = infringido.",
+    analyzeBtn:"Analizar", analyzing:"Analizando…", correct:"APLICADO CORRECTAMENTE", wrong:"INFRINGIDO / FALTA",
+    verdict:"VEREDICTO", corrected:"Corregido", tryEx:"Prueba:", errFail:"Análisis fallido — revisa la configuración del proveedor e inténtalo de nuevo.",
+    exception:"EXCEPCIÓN", settings:"Ajustes", provider:"Proveedor", modelLbl:"Modelo", apiKey:"Clave API", baseUrl:"URL base",
+    theme:"Tema", close:"Cerrar", learning:"Aprendizaje", explainIn:"Explicar en", secondary:"Secundario", none:"ninguno",
+    mapOnlyNl:"El mapa gramatical cubre actualmente el neerlandés. Para este idioma usa el Laboratorio de frases y Lucy — el mapa está en camino.",
+    tokens:"tokens", roles:"Roles de palabras", send:"Enviar", lucyPlaceholder:"Escribe en tu idioma meta (o el tuyo)…",
+    level:"Nivel", targetLevel:"Meta", style:"Estilo", tenseFocus:"Tiempo", name:"Nombre",
+    rolesOn:"Roles activados", rolesOff:"Roles desactivados", saveSession:"Guardar sesión", reset:"Restablecer", startSession:"Iniciar sesión",
+    target:"Idioma meta", noLlm:"aún sin llamadas LLM", keyNote:"Las claves se guardan solo en tu navegador (localStorage). Claude integrado no necesita clave pero solo funciona en la app alojada.",
+    lucyIntro:"Lucy es tu tutora conversacional — correcciones con reglas, conjugaciones, comparaciones de tiempos, resúmenes. Empieza a escribir.",
+    lucyBtns:{ explainLast:"🔍 Explicar", example:"💡 Ejemplo", flip:"🔄 Pregúntame", simpler:"🐢 Más simple", harder:"🔥 Más difícil",
+      annotate:"🎨 Anotar", deepDive:"📚 Profundizar", conj:"📊 Conjugar", timelines:"🕰️ Líneas de tiempo", nearby:"↔️ Tiempos cercanos",
+      verbday:"⭐ Verbo del día", roleplay:"🎭 Juego de rol", cloze:"✏️ Rellenar huecos", vocab:"🗂️ Consejo léxico", newTopic:"🆕 Nuevo tema", recap:"📋 Resumen" }
+  },
+  it: {
+    map:"Mappa grammaticale", lab:"Laboratorio di frasi", lucy:"Lucy", search:"Cerca regole, esempi…", all:"tutto",
+    examples:"Esempi", exceptions:"Eccezioni e trappole", why:"Perché esiste questa regola", related:"Correlati",
+    analyzeTitle:"Laboratorio di frasi", analyzeHint:"Scrivi una frase nella lingua di studio (o un tentativo). Il modello controlla quali regole si applicano — verde = corretto, rosso = violato.",
+    analyzeBtn:"Analizza", analyzing:"Analisi…", correct:"APPLICATO CORRETTAMENTE", wrong:"VIOLATO / MANCANTE",
+    verdict:"VERDETTO", corrected:"Corretto", tryEx:"Prova:", errFail:"Analisi fallita — controlla le impostazioni del provider e riprova.",
+    exception:"ECCEZIONE", settings:"Impostazioni", provider:"Provider", modelLbl:"Modello", apiKey:"Chiave API", baseUrl:"URL base",
+    theme:"Tema", close:"Chiudi", learning:"Apprendimento", explainIn:"Spiega in", secondary:"Secondaria", none:"nessuna",
+    mapOnlyNl:"La mappa grammaticale copre attualmente l'olandese. Per questa lingua usa il Laboratorio di frasi e Lucy — la mappa è in arrivo.",
+    tokens:"token", roles:"Ruoli delle parole", send:"Invia", lucyPlaceholder:"Scrivi nella lingua di studio (o nella tua)…",
+    level:"Livello", targetLevel:"Obiettivo", style:"Stile", tenseFocus:"Tempo", name:"Nome",
+    rolesOn:"Ruoli attivi", rolesOff:"Ruoli spenti", saveSession:"Salva sessione", reset:"Reimposta", startSession:"Avvia sessione",
+    target:"Lingua di studio", noLlm:"nessuna chiamata LLM", keyNote:"Le chiavi sono salvate solo nel tuo browser (localStorage). Claude integrato non richiede chiave ma funziona solo nell'app ospitata.",
+    lucyIntro:"Lucy è la tua tutor conversazionale — correzioni con regole, coniugazioni, confronti tra tempi, riepiloghi. Inizia a scrivere.",
+    lucyBtns:{ explainLast:"🔍 Spiega", example:"💡 Esempio", flip:"🔄 Interrogami", simpler:"🐢 Più semplice", harder:"🔥 Più difficile",
+      annotate:"🎨 Annota", deepDive:"📚 Approfondisci", conj:"📊 Coniuga", timelines:"🕰️ Linee temporali", nearby:"↔️ Tempi vicini",
+      verbday:"⭐ Verbo del giorno", roleplay:"🎭 Gioco di ruolo", cloze:"✏️ Completa", vocab:"🗂️ Consiglio lessico", newTopic:"🆕 Nuovo tema", recap:"📋 Riepilogo" }
+  },
+  pt: {
+    map:"Mapa gramatical", lab:"Laboratório de frases", lucy:"Lucy", search:"Pesquisar regras, exemplos…", all:"tudo",
+    examples:"Exemplos", exceptions:"Exceções e armadilhas", why:"Por que esta regra existe", related:"Relacionado",
+    analyzeTitle:"Laboratório de frases", analyzeHint:"Escreva uma frase na sua língua-alvo (ou uma tentativa). O modelo verifica quais regras se aplicam — verde = correto, vermelho = violado.",
+    analyzeBtn:"Analisar", analyzing:"Analisando…", correct:"APLICADO CORRETAMENTE", wrong:"VIOLADO / FALTANDO",
+    verdict:"VEREDITO", corrected:"Corrigido", tryEx:"Tente:", errFail:"Falha na análise — verifique as configurações do provedor e tente novamente.",
+    exception:"EXCEÇÃO", settings:"Configurações", provider:"Provedor", modelLbl:"Modelo", apiKey:"Chave API", baseUrl:"URL base",
+    theme:"Tema", close:"Fechar", learning:"Aprendizagem", explainIn:"Explicar em", secondary:"Secundária", none:"nenhuma",
+    mapOnlyNl:"O mapa gramatical cobre atualmente o neerlandês. Para esta língua use o Laboratório de frases e a Lucy — o mapa está a caminho.",
+    tokens:"tokens", roles:"Papéis das palavras", send:"Enviar", lucyPlaceholder:"Escreva na sua língua-alvo (ou na sua)…",
+    level:"Nível", targetLevel:"Meta", style:"Estilo", tenseFocus:"Tempo", name:"Nome",
+    rolesOn:"Papéis ativos", rolesOff:"Papéis desativados", saveSession:"Salvar sessão", reset:"Redefinir", startSession:"Iniciar sessão",
+    target:"Língua-alvo", noLlm:"sem chamadas LLM ainda", keyNote:"As chaves são guardadas apenas no seu navegador (localStorage). O Claude integrado não precisa de chave mas só funciona na app hospedada.",
+    lucyIntro:"A Lucy é a sua tutora de conversação — correções com regras, conjugações, comparações de tempos, resumos. Comece a escrever.",
+    lucyBtns:{ explainLast:"🔍 Explicar", example:"💡 Exemplo", flip:"🔄 Pergunte-me", simpler:"🐢 Mais simples", harder:"🔥 Mais difícil",
+      annotate:"🎨 Anotar", deepDive:"📚 Aprofundar", conj:"📊 Conjugar", timelines:"🕰️ Linhas do tempo", nearby:"↔️ Tempos próximos",
+      verbday:"⭐ Verbo do dia", roleplay:"🎭 Roleplay", cloze:"✏️ Preencher lacunas", vocab:"🗂️ Dica de vocab", newTopic:"🆕 Novo tema", recap:"📋 Resumo" }
+  },
+  pl: {
+    map:"Mapa gramatyki", lab:"Laboratorium zdań", lucy:"Lucy", search:"Szukaj reguł, przykładów…", all:"wszystko",
+    examples:"Przykłady", exceptions:"Wyjątki i pułapki", why:"Dlaczego ta reguła istnieje", related:"Powiązane",
+    analyzeTitle:"Laboratorium zdań", analyzeHint:"Wpisz zdanie w języku docelowym (lub próbę). Model sprawdza, które reguły obowiązują — zielony = poprawnie, czerwony = naruszone.",
+    analyzeBtn:"Analizuj", analyzing:"Analiza…", correct:"POPRAWNIE ZASTOSOWANE", wrong:"NARUSZONE / BRAK",
+    verdict:"WERDYKT", corrected:"Poprawione", tryEx:"Spróbuj:", errFail:"Analiza nie powiodła się — sprawdź ustawienia dostawcy i spróbuj ponownie.",
+    exception:"WYJĄTEK", settings:"Ustawienia", provider:"Dostawca", modelLbl:"Model", apiKey:"Klucz API", baseUrl:"Bazowy URL",
+    theme:"Motyw", close:"Zamknij", learning:"Nauka", explainIn:"Wyjaśniaj w", secondary:"Drugi język", none:"brak",
+    mapOnlyNl:"Mapa gramatyki obejmuje obecnie niderlandzki. Dla tego języka użyj Laboratorium zdań i Lucy — mapa jest w planach.",
+    tokens:"tokeny", roles:"Role wyrazów", send:"Wyślij", lucyPlaceholder:"Pisz w języku docelowym (lub swoim)…",
+    level:"Poziom", targetLevel:"Cel", style:"Styl", tenseFocus:"Czas", name:"Imię",
+    rolesOn:"Role wł.", rolesOff:"Role wył.", saveSession:"Zapisz sesję", reset:"Resetuj", startSession:"Rozpocznij sesję",
+    target:"Język docelowy", noLlm:"brak wywołań LLM", keyNote:"Klucze są przechowywane tylko w Twojej przeglądarce (localStorage). Wbudowany Claude nie wymaga klucza, ale działa tylko w hostowanej aplikacji.",
+    lucyIntro:"Lucy to Twoja konwersacyjna korepetytorka — poprawki z regułami, koniugacje, porównania czasów, podsumowania. Zacznij pisać.",
+    lucyBtns:{ explainLast:"🔍 Wyjaśnij", example:"💡 Przykład", flip:"🔄 Zapytaj mnie", simpler:"🐢 Prościej", harder:"🔥 Trudniej",
+      annotate:"🎨 Oznacz", deepDive:"📚 Pogłęb", conj:"📊 Odmień", timelines:"🕰️ Osie czasu", nearby:"↔️ Bliskie czasy",
+      verbday:"⭐ Czasownik dnia", roleplay:"🎭 Odgrywanie ról", cloze:"✏️ Uzupełnianie", vocab:"🗂️ Wskazówka słow.", newTopic:"🆕 Nowy temat", recap:"📋 Podsumowanie" }
+  },
+  sv: {
+    map:"Grammatikkarta", lab:"Meningslabb", lucy:"Lucy", search:"Sök regler, exempel…", all:"alla",
+    examples:"Exempel", exceptions:"Undantag & fallgropar", why:"Varför regeln finns", related:"Relaterat",
+    analyzeTitle:"Meningslabb", analyzeHint:"Skriv en mening på ditt målspråk (eller ett försök). Modellen kollar vilka regler som gäller — grönt = rätt, rött = brutet.",
+    analyzeBtn:"Analysera", analyzing:"Analyserar…", correct:"KORREKT TILLÄMPAD", wrong:"BRUTEN / SAKNAS",
+    verdict:"UTLÅTANDE", corrected:"Rättad", tryEx:"Testa:", errFail:"Analysen misslyckades — kontrollera leverantörsinställningarna och försök igen.",
+    exception:"UNDANTAG", settings:"Inställningar", provider:"Leverantör", modelLbl:"Modell", apiKey:"API-nyckel", baseUrl:"Bas-URL",
+    theme:"Tema", close:"Stäng", learning:"Lärande", explainIn:"Förklara på", secondary:"Sekundärt", none:"inget",
+    mapOnlyNl:"Grammatikkartan täcker för närvarande nederländska. För detta språk, använd Meningslabbet och Lucy — kartan är på gång.",
+    tokens:"tokens", roles:"Ordroller", send:"Skicka", lucyPlaceholder:"Skriv på ditt målspråk (eller ditt eget)…",
+    level:"Nivå", targetLevel:"Mål", style:"Stil", tenseFocus:"Tempus", name:"Namn",
+    rolesOn:"Roller på", rolesOff:"Roller av", saveSession:"Spara session", reset:"Återställ", startSession:"Starta session",
+    target:"Målspråk", noLlm:"inga LLM-anrop än", keyNote:"Nycklar lagras bara i din webbläsare (localStorage). Inbyggda Claude behöver ingen nyckel men fungerar bara i den hostade appen.",
+    lucyIntro:"Lucy är din samtalslärare — rättningar med regler, böjningar, tempusjämförelser, sammanfattningar. Börja bara skriva.",
+    lucyBtns:{ explainLast:"🔍 Förklara", example:"💡 Exempel", flip:"🔄 Fråga mig", simpler:"🐢 Enklare", harder:"🔥 Svårare",
+      annotate:"🎨 Markera", deepDive:"📚 Fördjupa", conj:"📊 Böj", timelines:"🕰️ Tidslinjer", nearby:"↔️ Närliggande tempus",
+      verbday:"⭐ Dagens verb", roleplay:"🎭 Rollspel", cloze:"✏️ Lucktext", vocab:"🗂️ Ordtips", newTopic:"🆕 Nytt ämne", recap:"📋 Sammanfattning" }
+  },
+  nl: {
+    map:"Grammaticakaart", lab:"Zinslab", lucy:"Lucy", search:"Zoek regels, voorbeelden…", all:"alle",
+    examples:"Voorbeelden", exceptions:"Uitzonderingen & valkuilen", why:"Waarom deze regel bestaat", related:"Gerelateerd",
+    analyzeTitle:"Zinslab", analyzeHint:"Typ een zin in je doeltaal (of een poging). Het model controleert welke regels gelden — groen = correct, rood = geschonden.",
+    analyzeBtn:"Analyseer", analyzing:"Analyseren…", correct:"CORRECT TOEGEPAST", wrong:"GESCHONDEN / ONTBREEKT",
+    verdict:"OORDEEL", corrected:"Gecorrigeerd", tryEx:"Probeer:", errFail:"Analyse mislukt — controleer de providerinstellingen en probeer opnieuw.",
+    exception:"UITZONDERING", settings:"Instellingen", provider:"Provider", modelLbl:"Model", apiKey:"API-sleutel", baseUrl:"Basis-URL",
+    theme:"Thema", close:"Sluiten", learning:"Leren", explainIn:"Uitleg in", secondary:"Tweede taal", none:"geen",
+    mapOnlyNl:"De samengestelde grammaticakaart dekt momenteel Nederlands. Gebruik voor deze taal het Zinslab en Lucy — de kaart komt eraan.",
+    tokens:"tokens", roles:"Woordrollen", send:"Verstuur", lucyPlaceholder:"Schrijf in je doeltaal (of je eigen taal)…",
+    level:"Niveau", targetLevel:"Doel", style:"Stijl", tenseFocus:"Tijd", name:"Naam",
+    rolesOn:"Rollen aan", rolesOff:"Rollen uit", saveSession:"Sessie opslaan", reset:"Resetten", startSession:"Sessie starten",
+    target:"Doeltaal", noLlm:"nog geen LLM-aanroepen", keyNote:"Sleutels worden alleen in je browser opgeslagen (localStorage). Ingebouwde Claude heeft geen sleutel nodig maar werkt alleen in de gehoste app.",
+    lucyIntro:"Lucy is je gesprekstutor — correcties met regels, vervoegingen, tijdvergelijkingen, samenvattingen. Begin gewoon te typen.",
+    lucyBtns:{ explainLast:"🔍 Leg laatste uit", example:"💡 Voorbeeld", flip:"🔄 Vraag mij", simpler:"🐢 Eenvoudiger", harder:"🔥 Moeilijker",
+      annotate:"🎨 Annoteer", deepDive:"📚 Verdiep", conj:"📊 Vervoeg", timelines:"🕰️ Tijdlijnen", nearby:"↔️ Nabije tijden",
+      verbday:"⭐ Werkwoord van de dag", roleplay:"🎭 Rollenspel", cloze:"✏️ Invuloefening", vocab:"🗂️ Woordtip", newTopic:"🆕 Nieuw onderwerp", recap:"📋 Samenvatting" }
+  }
+};
+// ── v3 strings for the new views. Any language may omit keys — applyLang layers
+// the English set underneath, so a partial translation degrades to English per
+// key instead of rendering "undefined".
+const UI_EXTRA = {
+  en: { review:"Review", progress:"Progress", reader:"Reader", practice:"Practice",
+    due:"due", newCards:"new", noDue:"Nothing due — you're all caught up.", startReview:"Start review",
+    again:"Again", hard:"Hard", good:"Good", easy:"Easy", showAnswer:"Show answer", endSession:"Finish",
+    reviewDone:"Session complete", cardsLeft:"left", streak:"Streak", days:"days", xp:"XP",
+    mastery:"Mastery", weakest:"Needs work", strongest:"Strong", activity:"Activity", noData:"No activity yet.",
+    readerHint:"Paste any text in your target language. Tap a word for an instant gloss, or a sentence to send it to the Lab or Lucy.", readerPlaceholder:"Paste an article, a song, a chat message…",
+    analyze:"Analyze", askLucy:"Ask Lucy", addVocab:"Add to vocab", speak:"Speak", stopSpeak:"Stop",
+    practiceTitle:"Practice this rule", generate:"Generate drill", checkAnswers:"Check", nextDrill:"New drill",
+    correctAns:"Correct", wrongAns:"Not quite", yourAnswer:"Your answer", answer:"Answer",
+    backup:"Backup", exportAll:"Export all data", importAll:"Import data", copyLink:"Copy link",
+    linkCopied:"Link copied", install:"Install app", search2:"Search rules, vocab, actions…",
+    palette:"Command palette", offline:"Offline — cached content only", clearAll:"Clear all data",
+    mic:"Speak", micListening:"Listening…", micUnsupported:"Speech input isn't available in this browser.",
+    ttsUnsupported:"Speech output isn't available in this browser.", vocabTab:"Vocab", mistakesTab:"Mistakes",
+    goalMet:"Daily goal reached!", dailyGoalLbl:"Daily goal", cards:"cards", accuracy:"Accuracy",
+    resume:"Resume", newSession:"New session", confirmClear:"Delete ALL saved data (vocab, progress, settings)?",
+    builtinMissing:"Built-in Claude is only available inside the Claude app. Open Settings (⚙) and choose a provider — an API key, OpenRouter's free tier, or a local model such as Ollama or LM Studio.",
+    setupTitle:"Choose how to power the AI features",
+    setupBody:"The Grammar Map works offline with no setup. The Sentence Lab, Lucy, Practice and word lookups need a language model — pick one in Settings. Your key stays in this browser.",
+    setupBtn:"Open settings", dismiss:"Later", keyMissing:"Add an API key in Settings (⚙) to use this provider." },
+  hu: { review:"Ismétlés", progress:"Haladás", reader:"Olvasó", practice:"Gyakorlás",
+    due:"esedékes", newCards:"új", noDue:"Nincs esedékes kártya — mindennel megvagy.", startReview:"Ismétlés indítása",
+    again:"Újra", hard:"Nehéz", good:"Jó", easy:"Könnyű", showAnswer:"Megoldás", endSession:"Befejezés",
+    reviewDone:"Kész a kör", cardsLeft:"maradt", streak:"Sorozat", days:"nap", xp:"XP",
+    mastery:"Tudásszint", weakest:"Gyakorlandó", strongest:"Erős", activity:"Aktivitás", noData:"Még nincs adat.",
+    readerHint:"Illessz be bármilyen szöveget a célnyelveden. Koppints egy szóra a jelentéséért, vagy egy mondatra, hogy a Laborba vagy Lucyhoz küldd.", readerPlaceholder:"Cikk, dalszöveg, üzenet…",
+    analyze:"Elemzés", askLucy:"Kérdezd Lucyt", addVocab:"Szótárba", speak:"Felolvas", stopSpeak:"Állj",
+    practiceTitle:"Gyakorold ezt a szabályt", generate:"Feladat kérése", checkAnswers:"Ellenőrzés", nextDrill:"Új feladat",
+    correctAns:"Helyes", wrongAns:"Nem egészen", yourAnswer:"A válaszod", answer:"Megoldás",
+    backup:"Mentés", exportAll:"Adatok exportálása", importAll:"Adatok importálása", copyLink:"Link másolása",
+    linkCopied:"Link másolva", install:"Alkalmazás telepítése", search2:"Keress szabályt, szót, műveletet…",
+    palette:"Parancspaletta", offline:"Offline — csak a gyorsítótár", clearAll:"Minden adat törlése",
+    mic:"Beszélj", micListening:"Hallgatlak…", micUnsupported:"A hangbevitel nem érhető el ebben a böngészőben.",
+    ttsUnsupported:"A felolvasás nem érhető el ebben a böngészőben.", vocabTab:"Szavak", mistakesTab:"Hibák",
+    goalMet:"Napi cél teljesítve!", dailyGoalLbl:"Napi cél", cards:"kártya", accuracy:"Pontosság",
+    resume:"Folytatás", newSession:"Új munkamenet", confirmClear:"Töröljem az ÖSSZES mentett adatot (szavak, haladás, beállítások)?",
+    builtinMissing:"A beépített Claude csak a Claude alkalmazásban érhető el. Nyisd meg a Beállításokat (⚙), és válassz szolgáltatót — API kulcsot, az OpenRouter ingyenes csomagját, vagy helyi modellt (Ollama, LM Studio).",
+    setupTitle:"Válaszd ki, mi hajtsa az MI-funkciókat",
+    setupBody:"A nyelvtani térkép beállítás nélkül, offline is működik. A Mondatlabor, Lucy, a gyakorlás és a szókikeresés nyelvi modellt igényel — válassz egyet a Beállításokban. A kulcs csak a böngésződben marad.",
+    setupBtn:"Beállítások", dismiss:"Később", keyMissing:"Adj meg egy API kulcsot a Beállításokban (⚙)." },
+  nl: { review:"Herhaling", progress:"Voortgang", reader:"Lezer", practice:"Oefenen",
+    due:"te doen", newCards:"nieuw", noDue:"Niets te herhalen — je bent bij.", startReview:"Start herhaling",
+    again:"Opnieuw", hard:"Moeilijk", good:"Goed", easy:"Makkelijk", showAnswer:"Toon antwoord", endSession:"Klaar",
+    reviewDone:"Sessie klaar", cardsLeft:"over", streak:"Reeks", days:"dagen", xp:"XP",
+    mastery:"Beheersing", weakest:"Oefenen", strongest:"Sterk", activity:"Activiteit", noData:"Nog geen activiteit.",
+    readerHint:"Plak een tekst in je doeltaal. Tik op een woord voor de betekenis, of op een zin om die naar het Lab of Lucy te sturen.", readerPlaceholder:"Een artikel, songtekst, bericht…",
+    analyze:"Analyseer", askLucy:"Vraag Lucy", addVocab:"Naar woordenlijst", speak:"Voorlezen", stopSpeak:"Stop",
+    practiceTitle:"Oefen deze regel", generate:"Maak oefening", checkAnswers:"Controleer", nextDrill:"Nieuwe oefening",
+    correctAns:"Goed", wrongAns:"Net niet", yourAnswer:"Jouw antwoord", answer:"Antwoord",
+    backup:"Back-up", exportAll:"Alles exporteren", importAll:"Data importeren", copyLink:"Kopieer link",
+    linkCopied:"Link gekopieerd", install:"App installeren", search2:"Zoek regels, woorden, acties…",
+    palette:"Commandopalet", offline:"Offline — alleen cache", clearAll:"Alle data wissen",
+    mic:"Spreek", micListening:"Ik luister…", micUnsupported:"Spraakinvoer werkt niet in deze browser.",
+    ttsUnsupported:"Voorlezen werkt niet in deze browser.", vocabTab:"Woorden", mistakesTab:"Fouten",
+    goalMet:"Dagdoel gehaald!", dailyGoalLbl:"Dagdoel", cards:"kaarten", accuracy:"Nauwkeurigheid",
+    resume:"Hervatten", newSession:"Nieuwe sessie", confirmClear:"ALLE opgeslagen data verwijderen (woorden, voortgang, instellingen)?",
+    builtinMissing:"Ingebouwde Claude bestaat alleen in de Claude-app. Open Instellingen (⚙) en kies een provider — een API-sleutel, de gratis laag van OpenRouter, of een lokaal model zoals Ollama of LM Studio.",
+    setupTitle:"Kies wat de AI-functies aandrijft",
+    setupBody:"De grammaticakaart werkt offline zonder instellingen. Het Zinslab, Lucy, oefeningen en woordopzoekingen hebben een taalmodel nodig — kies er een in Instellingen. Je sleutel blijft in deze browser.",
+    setupBtn:"Instellingen", dismiss:"Later", keyMissing:"Voeg een API-sleutel toe in Instellingen (⚙)." },
+  de: { review:"Wiederholen", progress:"Fortschritt", reader:"Leser", practice:"Üben",
+    due:"fällig", newCards:"neu", noDue:"Nichts fällig — alles erledigt.", startReview:"Wiederholung starten",
+    again:"Nochmal", hard:"Schwer", good:"Gut", easy:"Leicht", showAnswer:"Antwort zeigen", endSession:"Fertig",
+    streak:"Serie", days:"Tage", mastery:"Beherrschung", weakest:"Üben", strongest:"Stark", activity:"Aktivität",
+    analyze:"Analysieren", askLucy:"Lucy fragen", speak:"Vorlesen", practiceTitle:"Diese Regel üben",
+    generate:"Übung erzeugen", checkAnswers:"Prüfen", nextDrill:"Neue Übung", backup:"Sicherung", install:"App installieren" },
+  fr: { review:"Révision", progress:"Progrès", reader:"Lecteur", practice:"Pratique",
+    due:"à revoir", newCards:"nouveau", startReview:"Commencer", again:"Encore", hard:"Difficile", good:"Bien", easy:"Facile",
+    showAnswer:"Voir la réponse", endSession:"Terminer", streak:"Série", days:"jours", mastery:"Maîtrise",
+    analyze:"Analyser", askLucy:"Demander à Lucy", speak:"Lire à voix haute", checkAnswers:"Vérifier", install:"Installer l'app" },
+  es: { review:"Repaso", progress:"Progreso", reader:"Lector", practice:"Práctica",
+    due:"pendiente", newCards:"nuevo", startReview:"Empezar repaso", again:"Otra vez", hard:"Difícil", good:"Bien", easy:"Fácil",
+    showAnswer:"Ver respuesta", endSession:"Terminar", streak:"Racha", days:"días", mastery:"Dominio",
+    analyze:"Analizar", askLucy:"Preguntar a Lucy", speak:"Leer en voz alta", checkAnswers:"Comprobar", install:"Instalar app" }
+};
+const UI = { ...UI_STRINGS.en, ...UI_EXTRA.en };
+// English underneath every language: a missing key falls back instead of vanishing.
+function applyLang(code){
+  Object.assign(UI, UI_STRINGS.en, UI_EXTRA.en, UI_STRINGS[code] || {}, UI_EXTRA[code] || {});
+}
+
+// lightweight inline markdown → React (bold, italic, `code`)
+function mdInline(text, T) {
+  const parts = []; let i = 0, key = 0;
+  const re = /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_|`([^`]+)`)/g;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m.index > i) parts.push(text.slice(i, m.index));
+    if (m[2] || m[3]) parts.push(<strong key={key++} style={{ fontWeight:800, color:T.text }}>{m[2]||m[3]}</strong>);
+    else if (m[4] || m[5]) parts.push(<em key={key++} style={{ fontStyle:"italic" }}>{m[4]||m[5]}</em>);
+    else if (m[6]) parts.push(<code key={key++} style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:"0.92em", background:T.chip, padding:"1px 4px", borderRadius:4 }}>{m[6]}</code>);
+    i = m.index + m[0].length;
+  }
+  if (i < text.length) parts.push(text.slice(i));
+  return parts;
+}
+
+function Tokens({ tokens, size }) {
+  const T = React.useContext(ThemeCtx);
+  return (
+    <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:size||13, lineHeight:1.7 }}>
+      {tokens.map(([text, role], i) => {
+        const r = ROLES[role] || ROLES.x;
+        return <span key={i} style={{ color: r.color || T.text, fontWeight: role==="vfin"?700:500, marginRight:5 }} title={r.en}>{text}</span>;
+      })}
+    </span>
+  );
+}
+function LevelBadge({ level }) {
+  return <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:9, fontWeight:700, color:LEVEL_COLOR[level],
+    border:`1px solid ${LEVEL_COLOR[level]}55`, borderRadius:3, padding:"1px 5px", letterSpacing:.5, flexShrink:0 }}>{level}</span>;
+}
+
+Object.assign(window, { CLUSTERS, NODE_INDEX, LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName,
+  ROLES, roleMeaning, CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
+  USAGE, useUsage, llmCall, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });

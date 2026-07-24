@@ -1,0 +1,37 @@
+{
+  "name": "LinguaMap — Grammar Studio",
+  "short_name": "LinguaMap",
+  "description": "Grammar map, sentence lab, AI tutor and spaced repetition for European languages.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "any",
+  "categories": [
+    "education",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Review",
+      "url": "./#/review"
+    },
+    {
+      "name": "Lucy",
+      "url": "./#/lucy"
+    },
+    {
+      "name": "Reader",
+      "url": "./#/reader"
+    }
+  ]
+}
