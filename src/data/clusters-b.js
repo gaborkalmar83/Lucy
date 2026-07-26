@@ -252,7 +252,7 @@ window.GRAM_CLUSTERS_B = [
           { tokens: [["ik","s"],["heb","vfin"],["het","o"],["moeten","vinf"],["doen","vinf"]], en: "I had to do it (IPP)", hu: "meg kellett tennem (IPP)" },
           { tokens: [["hij","s"],["heeft","vfin"],["haar","o"],["willen","vinf"],["helpen","vinf"]], en: "he wanted to help her", hu: "segíteni akart neki" }
         ],
-        links: ["ipp"]
+        links: ["sep_te"]
       }
     ],
     exceptions: [

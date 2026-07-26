@@ -7,7 +7,7 @@ why that rule exists, gives you drills for it, and then brings it back days late
 when you're about to forget it.
 
 **Dutch, English and Hungarian** each come with a hand-written grammar map —
-65, 41 and 41 rules. Thirteen further European languages work through the AI
+75, 41 and 63 rules. Thirteen further European languages work through the AI
 features.
 
 Everything runs in your browser — no account, no server, no tracking — and you
@@ -24,9 +24,9 @@ Hand-written maps for three languages:
 
 | Language | Rules | Covers |
 |---|---|---|
-| 🇳🇱 Dutch | 65 in 18 clusters | *de/het*, word order, perfect vs imperfect, modals, separable verbs |
+| 🇳🇱 Dutch | 75 in 22 clusters | *de/het*, word order, perfect vs imperfect, modals, separable verbs, prepositions, relative clauses, modal particles |
 | 🇬🇧 English | 41 in 12 clusters | articles, tense system, perfect aspect, conditionals, phrasal verbs |
-| 🇭🇺 Hungarian | 41 in 11 clusters | vowel harmony, the case system, definite vs indefinite conjugation, verbal prefixes, focus |
+| 🇭🇺 Hungarian | 63 in 17 clusters | vowel harmony, the full case system, definite vs indefinite conjugation, possession, verbal prefixes, focus, participles, causatives, derivation |
 
 Every rule gives you:
 
@@ -37,6 +37,7 @@ Every rule gives you:
   object…) so you can *see* the pattern
 - **Exceptions and pitfalls**, flagged separately with ⚠
 - **Links to related rules**, because grammar isn't a list, it's a web
+- **Practice** and **Drill with Lucy** on every rule *and* every exception
 
 Search it, filter by CEFR level (A1–C1), tap 🔊 to hear any example, and every
 rule has its own link you can bookmark or share.
@@ -106,6 +107,10 @@ Streak, XP, daily goal and a 12-week activity grid. More usefully, a
 **"needs work"** list. Tap ✏️ next to any weak rule and the app generates
 multiple-choice drills for exactly that rule.
 
+It also reports **model usage**: tokens in and out, calls and tokens per second
+broken down by provider and model, over the last 24 hours, 7 days or 30 days —
+so you can see what a given model actually costs you.
+
 ### And throughout
 
 - **Two explanation languages at once.** Set a second language (say Hungarian
@@ -119,6 +124,9 @@ multiple-choice drills for exactly that rule.
 - **Speak instead of typing** in the Lab and with Lucy.
 - 16 target languages · 12 explanation languages (incl. Macedonian and Serbian) · 4 themes · CEFR levels
 - The word-roles bar can display in either of your explanation languages
+- **Custom instructions** in Settings, added to every request (e.g. "always
+  compare with German") without breaking the app's own output format
+- **Debug readout** showing response time, tokens and tokens-per-second
 - Works offline, installs to your phone or desktop like a real app
 
 ---

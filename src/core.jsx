@@ -3,9 +3,9 @@
 // and are swapped when the target language changes; every consumer reads them
 // at render time, so reassigning the bindings is enough.
 const GRAM_MAPS = {
-  nl: [...window.GRAM_CLUSTERS_A, ...window.GRAM_CLUSTERS_B, ...window.GRAM_CLUSTERS_C],
+  nl: [...window.GRAM_CLUSTERS_A, ...window.GRAM_CLUSTERS_B, ...window.GRAM_CLUSTERS_C, ...(window.GRAM_CLUSTERS_D || [])],
   en: window.GRAM_EN || [],
-  hu: window.GRAM_HU || []
+  hu: [...(window.GRAM_HU || []), ...(window.GRAM_HU2 || [])]
 };
 let CLUSTERS = [];
 let NODE_INDEX = {};
