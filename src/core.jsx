@@ -152,7 +152,23 @@ const DEFAULT_SETTINGS = {
   rolesLang:"primary",                         // which language the roles bar shows
   readerProxy:"https://r.jina.ai/",            // used to fetch article text past CORS
   systemExtra:"",                              // appended to every system prompt
-  debug:false                                  // show timing / tokens / tok-per-sec
+  debug:false,                                 // show timing / tokens / tok-per-sec
+  // Voice mode is configured separately from the text provider: the two are
+  // different services, and only some vendors offer a realtime speech API.
+  voice:{
+    engine:"browser",                          // browser | azure | openai
+    sameAsText:true,                           // reuse the text provider's credentials where they fit
+    azureEndpoint:"", azureKey:"", azureApiVersion:"2025-05-01-preview",
+    model:"gpt-realtime", voiceName:"",
+    openaiKey:"",
+    vadThreshold:0.5, vadPrefixMs:300, vadSilenceMs:500,
+    echoCancel:true, noiseReduction:true,
+    transcribeModel:"whisper-1",
+    style:"tutor",                             // how chatty Lucy is out loud
+    rate:0.95,
+    instructionsExtra:"",
+    sessionJson:""                             // raw session.update override
+  }
 };
 const DONATE_URL = "https://buymeacoffee.com/gaborkalmar";
 function loadSettings(){
@@ -160,7 +176,8 @@ function loadSettings(){
     const saved = JSON.parse(localStorage.getItem("dgs2")||"{}");
     return { ...DEFAULT_SETTINGS, ...saved,
       lucy:{ ...DEFAULT_SETTINGS.lucy, ...(saved.lucy||{}) },
-      speak:{ ...DEFAULT_SETTINGS.speak, ...(saved.speak||{}) } };
+      speak:{ ...DEFAULT_SETTINGS.speak, ...(saved.speak||{}) },
+      voice:{ ...DEFAULT_SETTINGS.voice, ...(saved.voice||{}) } };
   } catch(e){ return { ...DEFAULT_SETTINGS }; }
 }
 function saveSettings(s){ try { localStorage.setItem("dgs2", JSON.stringify(s)); } catch(e){} }
@@ -529,6 +546,18 @@ const UI_EXTRA = {
     drillLucy:"Drill with Lucy", customPrompt:"Custom instructions",
     customPromptNote:"Added to every request on top of the app's own instructions — useful for things like \"always compare with German\" or \"keep examples about cooking\". It cannot override the output format the app depends on.",
     debugMode:"Debug readout", debugNote:"Shows response time, tokens and tokens-per-second for the last call in the bottom bar.",
+    voiceMode:"Voice mode", voiceStart:"Start talking", voiceStop:"Stop",
+    voiceIdle:"not started", voiceConnecting:"connecting…", voiceListening:"listening",
+    voiceThinking:"thinking…", voiceSpeaking:"speaking",
+    voiceHintRealtime:"Speak naturally — you can interrupt at any time and Lucy will stop and listen.",
+    voiceHintBrowser:"Speak, pause, and Lucy will answer out loud. She waits for you to finish before replying.",
+    voiceSettings:"Voice mode", voiceEngine:"Engine", voiceSameAsText:"Use my text provider's key where it fits",
+    voiceVoice:"Voice", voiceVad:"Turn detection", voiceThreshold:"Sensitivity", voicePrefix:"Lead-in (ms)",
+    voiceSilence:"Silence before reply (ms)", voiceEcho:"Echo cancellation", voiceNoise:"Noise suppression",
+    voiceStyleLbl:"Speaking style", voiceAdvanced:"Advanced session JSON",
+    voiceAdvancedNote:"Merged into session.update last, so it overrides everything above. Leave empty unless you know the API.",
+    voiceEngineNote:"Azure VoiceLive and OpenAI Realtime are true speech-to-speech and can be interrupted mid-sentence. Browser speech works with every provider — including a local model — but takes turns instead.",
+    voiceTest:"Test connection", voiceNoRealtime:"This provider has no realtime speech API. Browser speech is used instead.",
     due:"due", newCards:"new", noDue:"Nothing due — you're all caught up.", startReview:"Start review",
     again:"Again", hard:"Hard", good:"Good", easy:"Easy", showAnswer:"Show answer", endSession:"Finish",
     reviewDone:"Session complete", cardsLeft:"left", streak:"Streak", days:"days", xp:"XP",

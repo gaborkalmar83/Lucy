@@ -252,6 +252,146 @@ function Field({ label, children }) {
   );
 }
 
+// Voice is configured on its own: it is a different service from the text
+// model, and only Azure and OpenAI offer a realtime speech API at all.
+function VoiceSettings({ S, setS, T, inp, inp2 }) {
+  const V = S.voice;
+  const setV = (patch) => setS({ ...S, voice: { ...V, ...patch } });
+  const realtime = V.engine === "azure" || V.engine === "openai";
+  const suggestions = V.engine === "openai" ? OPENAI_VOICES : (AZURE_VOICE_SUGGESTIONS[S.target] || []);
+  const row = { display:"flex", gap:10, alignItems:"center", marginTop:8, flexWrap:"wrap" };
+  const lbl = { fontSize:11, color:T.faint, minWidth:118 };
+
+  return (
+    <React.Fragment>
+      <Field label={"🎙️ " + UI.voiceSettings + " — " + UI.voiceEngine}>
+        <select value={V.engine} onChange={e => setV({ engine:e.target.value })} style={inp}>
+          {VOICE_ENGINES.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+        <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.voiceEngineNote}</div>
+      </Field>
+
+      {V.engine === "azure" && (
+        <React.Fragment>
+          <Field label="Azure VoiceLive endpoint">
+            <input value={V.azureEndpoint} onChange={e => setV({ azureEndpoint:e.target.value })}
+              placeholder="https://my-resource.services.ai.azure.com" style={inp} />
+          </Field>
+          <Field label={UI.apiKey + " (VoiceLive)"}>
+            <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
+              <input type="password" value={V.azureKey} onChange={e => setV({ azureKey:e.target.value })}
+                placeholder="Azure key" style={{ ...inp, flex:"1 1 180px" }} />
+              {S.azureKey && S.azureKey !== V.azureKey && (
+                <button onClick={() => setV({ azureKey:S.azureKey, azureEndpoint: V.azureEndpoint || S.azureEndpoint })}
+                  style={{ padding:"8px 12px", fontSize:11.5, borderRadius:8, border:`1px solid ${T.border}`,
+                    background:T.panel2, color:T.mute, cursor:"pointer", whiteSpace:"nowrap" }}>↙ {UI.voiceSameAsText}</button>
+              )}
+            </div>
+          </Field>
+          <div style={row}>
+            <span style={lbl}>model</span>
+            <input value={V.model} onChange={e => setV({ model:e.target.value })} placeholder="gpt-realtime"
+              style={{ ...inp, flex:1 }} />
+          </div>
+          <div style={row}>
+            <span style={lbl}>api-version</span>
+            <input value={V.azureApiVersion} onChange={e => setV({ azureApiVersion:e.target.value })}
+              placeholder="2025-05-01-preview" style={{ ...inp, flex:1 }} />
+          </div>
+        </React.Fragment>
+      )}
+
+      {V.engine === "openai" && (
+        <React.Fragment>
+          <Field label={UI.apiKey + " (OpenAI Realtime)"}>
+            <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
+              <input type="password" value={V.openaiKey} onChange={e => setV({ openaiKey:e.target.value })}
+                placeholder="sk-…" style={{ ...inp, flex:"1 1 180px" }} />
+              {S.openaiKey && S.openaiKey !== V.openaiKey && (
+                <button onClick={() => setV({ openaiKey:S.openaiKey })}
+                  style={{ padding:"8px 12px", fontSize:11.5, borderRadius:8, border:`1px solid ${T.border}`,
+                    background:T.panel2, color:T.mute, cursor:"pointer", whiteSpace:"nowrap" }}>↙ {UI.voiceSameAsText}</button>
+              )}
+            </div>
+          </Field>
+          <div style={row}>
+            <span style={lbl}>model</span>
+            <input value={V.model} onChange={e => setV({ model:e.target.value })}
+              placeholder="gpt-4o-realtime-preview" style={{ ...inp, flex:1 }} />
+          </div>
+        </React.Fragment>
+      )}
+
+      <Field label={UI.voiceVoice}>
+        <input value={V.voiceName} onChange={e => setV({ voiceName:e.target.value })}
+          placeholder={realtime ? (suggestions[0] || "voice name") : "uses the browser voice from 🔊 above"}
+          style={inp} disabled={!realtime} />
+        {realtime && suggestions.length > 0 && (
+          <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
+            {suggestions.map(v => (
+              <button key={v} onClick={() => setV({ voiceName:v })} style={{ padding:"3px 9px", fontSize:10.5,
+                borderRadius:6, cursor:"pointer", border:`1px solid ${V.voiceName===v ? T.accent : T.border}`,
+                background: V.voiceName===v ? T.accent+"22" : "transparent", color: V.voiceName===v ? T.accent : T.mute }}>{v}</button>
+            ))}
+          </div>
+        )}
+      </Field>
+
+      <Field label={UI.voiceStyleLbl}>
+        <div style={{ display:"flex", gap:6 }}>
+          {[["tutor","Tutor"],["strict","Strict"],["immersive","Immersive"]].map(([id,l]) => (
+            <button key={id} onClick={() => setV({ style:id })} style={{ flex:1, padding:"6px", fontSize:11.5,
+              fontWeight:700, borderRadius:8, cursor:"pointer",
+              border:`1px solid ${V.style===id ? T.accent : T.border}`,
+              background: V.style===id ? T.accent+"22" : "transparent", color:T.text }}>{l}</button>
+          ))}
+        </div>
+      </Field>
+
+      {realtime && (
+        <Field label={UI.voiceVad}>
+          <div style={row}>
+            <span style={lbl}>{UI.voiceThreshold} {Number(V.vadThreshold).toFixed(2)}</span>
+            <input type="range" min="0.1" max="0.9" step="0.05" value={V.vadThreshold}
+              onChange={e => setV({ vadThreshold:Number(e.target.value) })} style={{ flex:1 }} />
+          </div>
+          <div style={row}>
+            <span style={lbl}>{UI.voicePrefix}</span>
+            <input type="number" min="0" max="1000" step="50" value={V.vadPrefixMs}
+              onChange={e => setV({ vadPrefixMs:Number(e.target.value) })} style={inp2} />
+            <span style={lbl}>{UI.voiceSilence}</span>
+            <input type="number" min="100" max="3000" step="50" value={V.vadSilenceMs}
+              onChange={e => setV({ vadSilenceMs:Number(e.target.value) })} style={inp2} />
+          </div>
+          <div style={{ display:"flex", gap:14, marginTop:9, flexWrap:"wrap" }}>
+            <label style={{ fontSize:11.5, color:T.mute, display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
+              <input type="checkbox" checked={!!V.echoCancel} onChange={e => setV({ echoCancel:e.target.checked })} />
+              {UI.voiceEcho}</label>
+            <label style={{ fontSize:11.5, color:T.mute, display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
+              <input type="checkbox" checked={!!V.noiseReduction} onChange={e => setV({ noiseReduction:e.target.checked })} />
+              {UI.voiceNoise}</label>
+          </div>
+        </Field>
+      )}
+
+      <Field label={UI.customPrompt + " — " + UI.voiceMode}>
+        <textarea value={V.instructionsExtra} onChange={e => setV({ instructionsExtra:e.target.value })}
+          placeholder="e.g. Always start by asking how my day was. Never speak English."
+          style={{ ...inp, minHeight:56, resize:"vertical", fontFamily:"'IBM Plex Sans',sans-serif" }} />
+      </Field>
+
+      {realtime && (
+        <Field label={UI.voiceAdvanced}>
+          <textarea value={V.sessionJson} onChange={e => setV({ sessionJson:e.target.value })}
+            placeholder='{"temperature":0.8}'
+            style={{ ...inp, minHeight:52, resize:"vertical" }} />
+          <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.voiceAdvancedNote}</div>
+        </Field>
+      )}
+    </React.Fragment>
+  );
+}
+
 function Settings({ S, setS, onClose }) {
   const T = React.useContext(ThemeCtx);
   const voices = useVoices();
@@ -492,6 +632,9 @@ function Settings({ S, setS, onClose }) {
             placeholder="https://r.jina.ai/" style={inp} />
           <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.readerProxyNote}</div>
         </Field>
+
+        <div style={{ height:1, background:T.border, margin:"18px 0 16px" }}></div>
+        <VoiceSettings S={S} setS={setS} T={T} inp={inp} inp2={inp2} />
 
         <Field label={"📝 " + UI.customPrompt}>
           <textarea value={S.systemExtra} onChange={e => setS({ ...S, systemExtra:e.target.value })}

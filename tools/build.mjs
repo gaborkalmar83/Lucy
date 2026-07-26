@@ -16,7 +16,7 @@ const DEV = process.argv.includes('--dev');
 // Load order matters: each file attaches to window for the next one.
 const PLAIN = ['data/clusters-a.js', 'data/clusters-b.js', 'data/clusters-c.js', 'data/clusters-d.js',
   'data/grammar-en.js', 'data/grammar-hu.js', 'data/grammar-hu2.js'];
-const JSX = ['core.jsx', 'store.jsx', 'views.jsx', 'lab.jsx', 'lucy.jsx', 'shell.jsx'];
+const JSX = ['core.jsx', 'store.jsx', 'views.jsx', 'voice.jsx', 'lab.jsx', 'lucy.jsx', 'shell.jsx'];
 
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 

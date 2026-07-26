@@ -240,6 +240,24 @@ function Lucy({ S, setS, seed, clearSeed, onOpenNode }) {
   };
 
   const dictate = useDictation(S.target, (txt) => setInput(txt));
+  const [voiceOpen, setVoiceOpen] = React.useState(false);
+
+  // Voice mode shares Lucy's persona and level, but speaks instead of writing —
+  // so the written formatting rules are replaced with spoken-conversation ones.
+  const voiceInstructions = () => {
+    const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
+    const style = (S.voice && S.voice.style) || "tutor";
+    const styleLine = style === "strict"
+      ? "Correct every meaningful mistake immediately, briefly, then continue."
+      : style === "immersive"
+      ? `Speak only ${tgt.name}. Correct only what blocks understanding, and rephrase rather than lecture.`
+      : "Correct the most important mistake per turn, briefly and kindly, then keep the conversation going.";
+    return `You are Lucy, a warm ${tgt.name} tutor having a SPOKEN conversation with ${S.lucy.name || "a learner"} at CEFR ${S.level}, aiming for ${S.targetLevel}.
+Speak ${tgt.name}. ${styleLine}
+This is speech, not writing: short sentences, no markdown, no bullet points, no emoji, no spelling things out. Never read punctuation aloud.
+Keep each turn to a few sentences and end by inviting the learner to speak.
+If the learner is clearly lost, briefly explain in ${langName(S.primary)} and return to ${tgt.name}.${S.secondary ? ` Their other language is ${langName(S.secondary)}; use it only if ${langName(S.primary)} does not land.` : ""}${S.voice && S.voice.instructionsExtra ? "\n" + S.voice.instructionsExtra : ""}${S.systemExtra ? "\n" + S.systemExtra : ""}`;
+  };
 
   const logMistake = (reply) => {
     const l = reply.split("\n");
@@ -306,6 +324,9 @@ function Lucy({ S, setS, seed, clearSeed, onOpenNode }) {
         <Sel label={t.tenseFocus} value={S.lucy.tense} opts={["any","present","past","future"]} onChange={v => setLucy({ tense:v })} />
         <button onClick={() => setPanel("vocab")} title="Vocab & mistakes" style={{ padding:"5px 10px", fontSize:11, borderRadius:7,
           border:`1px solid ${T.border}`, background:T.panel, color:T.mute, cursor:"pointer" }}>🗂️ {vocab.length} · ⚠ {mistakes.length}</button>
+        <button onClick={() => setVoiceOpen(true)} title={UI.voiceMode}
+          style={{ padding:"5px 11px", fontSize:11, fontWeight:700, borderRadius:7, cursor:"pointer",
+            border:`1px solid ${T.accent}`, background:T.accent+"1a", color:T.accent }}>🎙️ {UI.voiceMode}</button>
         {ttsOk() && (
           <button onClick={() => setS({ ...S, speak:{ ...S.speak, auto: !S.speak.auto } })}
             title="Auto-read Lucy's replies aloud" style={{ padding:"5px 9px", fontSize:11, borderRadius:7,
@@ -359,6 +380,11 @@ function Lucy({ S, setS, seed, clearSeed, onOpenNode }) {
           border:"none", background: busy ? T.chip : T.accent, color: busy ? T.mute : T.accentText, cursor:busy?"wait":"pointer" }}>{t.send}</button>
       </div>
 
+      {voiceOpen && (
+        <VoicePanel S={S} instructions={voiceInstructions()} onClose={() => setVoiceOpen(false)}
+          onUser={(t) => setMsgs(m => [...m, { role:"user", content:t }])}
+          onAssistant={(t) => { setMsgs(m => [...m, { role:"assistant", content:t }]); logMistake(t); bumpDay({ chats:1, xp:2 }); }} />
+      )}
       {panel && <SidePanel tab={panel} setTab={setPanel} vocab={vocab} setVocab={setVocab} mistakes={mistakes} setMistakes={setMistakes} onClose={() => setPanel(null)} />}
     </div>
   );

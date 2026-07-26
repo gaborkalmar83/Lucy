@@ -164,6 +164,7 @@ const masteryOf = (r) => { if (!r || (r.ok + r.bad) === 0) return null; return r
 // ── Backup / restore ─────────────────────────────────────────────────────────
 const BACKUP_KEYS = Object.values(KEYS);
 const SECRET_FIELDS = ["anthropicKey", "openaiKey", "openrouterKey", "azureKey"];
+const VOICE_SECRETS = ["azureKey", "openaiKey"];
 
 // A backup is meant to be carried between devices (phone ↔ laptop) and is easy
 // to end up in cloud storage or a chat. API keys are therefore stripped unless
@@ -175,6 +176,8 @@ function exportAll(includeKeys) {
     try {
       const s = JSON.parse(data[KEYS.settings]);
       SECRET_FIELDS.forEach(f => { if (s[f]) s[f] = ""; });
+      // Voice mode keeps its own credentials in a nested object.
+      if (s.voice) VOICE_SECRETS.forEach(f => { if (s.voice[f]) s.voice[f] = ""; });
       data[KEYS.settings] = JSON.stringify(s);
     } catch(e) { delete data[KEYS.settings]; }   // unparseable → drop rather than risk it
   }
@@ -190,6 +193,7 @@ function importAll(obj) {
     try {
       const s = JSON.parse(localStorage.getItem(KEYS.settings) || "{}");
       SECRET_FIELDS.forEach(f => { if (!s[f] && existing[f]) s[f] = existing[f]; });
+      if (s.voice && existing.voice) VOICE_SECRETS.forEach(f => { if (!s.voice[f] && existing.voice[f]) s.voice[f] = existing.voice[f]; });
       localStorage.setItem(KEYS.settings, JSON.stringify(s));
     } catch(e){}
   }

@@ -93,6 +93,26 @@ nos.nl, say. It is split into sentences and laid out in two columns, side by sid
 
 Translations are fetched per sentence, so you only pay for what you actually read.
 
+### 🎙️ Voice mode — actually talk to Lucy
+
+Open Lucy and press **🎙️ Voice mode**. Three engines, because only some
+providers offer realtime speech:
+
+| Engine | What you get | Who it works for |
+|---|---|---|
+| **Browser speech** | You speak, Lucy answers out loud, turn by turn | **Everyone** — including local models, OpenRouter, Anthropic |
+| **Azure VoiceLive** | True speech-to-speech. Interrupt her mid-sentence and she stops and listens | Azure AI Foundry users |
+| **OpenAI Realtime** | Same, on OpenAI | OpenAI API users |
+
+Voice has its **own settings section**, separate from the text provider — its own
+endpoint, key, model, voice and turn-detection tuning. Text mode and voice mode
+work independently; they can use the same provider or two different ones.
+
+Nothing is hard-coded: sensitivity, lead-in, silence-before-reply, echo
+cancellation, noise suppression, speaking style and an extra instructions box
+are all exposed, plus a raw **session JSON** override that is merged last for
+anything the UI does not surface.
+
 ### 🔁 Review — so you don't forget it a week later
 
 Proper spaced repetition (the SM-2 algorithm, same family as Anki). The clever
@@ -174,6 +194,56 @@ Start-menu entry and its own window.
 | `1` – `6` | Switch view |
 | `Ctrl`+`,` | Settings |
 | `space` then `1`–`4` | Reveal and grade a review card |
+
+---
+
+## Setting up voice mode
+
+### Azure VoiceLive (what you get if you already use Azure AI Foundry)
+
+1. In the Azure portal, open your **Azure AI Foundry** resource (the same one
+   whose endpoint looks like `https://<name>.services.ai.azure.com`).
+2. Deploy a realtime voice model — `gpt-realtime` — in that resource.
+3. Copy the resource **endpoint** and one of its **keys**.
+4. In LinguaMap: **⚙ → Voice mode**, choose **Azure VoiceLive**, paste the
+   endpoint and key, set the model to your deployment, and pick a voice
+   (`nl-NL-FennaNeural` for Dutch, `en-US-Ava:DragonHDLatestNeural` for English).
+
+The app connects to `wss://<your-resource>/voice-live/realtime` with the
+api-version shown in Settings. If Microsoft moves the preview forward, change
+that api-version field rather than waiting for an app update.
+
+**Two things to know.** A browser cannot set headers on a WebSocket, so the key
+travels as a query parameter — use a key you are willing to expose on your own
+device, and rotate it if in doubt. And your resource may need this site added to
+its **allowed origins / CORS** before the browser can connect.
+
+### OpenAI Realtime
+
+Choose **OpenAI Realtime**, paste an OpenAI key, model
+`gpt-4o-realtime-preview`, and pick a voice (alloy, echo, shimmer…). OpenAI
+authenticates browser WebSockets with a key in the subprotocol, which they
+themselves label insecure — fine on your own machine, not on a shared one.
+
+### Everyone else — local models, OpenRouter, Anthropic
+
+These have no realtime speech API, so voice mode uses **browser speech**:
+your microphone → the browser's speech recognition → your configured text model
+→ the browser's speech synthesis. Nothing extra to set up, no additional key,
+and it works with a model running on your own PC.
+
+The trade-off is that it takes turns: Lucy waits for you to stop speaking before
+replying, and you cannot interrupt her. Recognition quality is the browser's,
+which is good in Chrome and weaker in Firefox.
+
+### If voice will not start
+
+- **Microphone blocked** — the site needs microphone permission, and browsers
+  only grant it over https or on localhost.
+- **Connects then drops** — usually a wrong api-version or a model that is not
+  deployed in that resource. The error text is shown in the panel.
+- **Silence** — lower the sensitivity, or raise "silence before reply" if she
+  cuts you off mid-thought.
 
 ---
 
