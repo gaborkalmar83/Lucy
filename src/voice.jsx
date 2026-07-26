@@ -37,6 +37,46 @@ const OPENAI_VOICES = ["alloy", "echo", "shimmer", "ballad", "coral", "sage", "v
 
 const RATE = 24000;   // both APIs speak PCM16 mono at 24 kHz
 
+// Candidate VoiceLive api-versions, newest first. There is no discovery
+// endpoint, so "detect" simply opens a socket with each until one is accepted.
+const VOICE_API_VERSIONS = [
+  "2025-10-01", "2025-05-01-preview", "2025-04-01-preview", "2024-10-01-preview"
+];
+
+// One provider for everything: when sameAsText is on, voice borrows the text
+// provider's endpoint and key rather than keeping a second copy of them.
+function voiceCreds(S) {
+  const V = S.voice || {};
+  if (V.sameAsText) {
+    if (V.engine === "azure" && S.provider === "azure") return { endpoint: S.azureEndpoint, key: S.azureKey };
+    if (V.engine === "openai" && S.provider === "openai") return { endpoint: "", key: S.openaiKey };
+  }
+  return { endpoint: V.azureEndpoint, key: V.engine === "openai" ? V.openaiKey : V.azureKey };
+}
+
+// Azure neural voices per language. Bundled rather than fetched: the voice list
+// lives on the Speech service, not on the Foundry endpoint the app talks to.
+const AZURE_VOICES = {
+  nl: ["nl-NL-FennaNeural","nl-NL-ColetteNeural","nl-NL-MaartenNeural","nl-BE-DenaNeural","nl-BE-ArnaudNeural"],
+  en: ["en-US-Ava:DragonHDLatestNeural","en-US-AvaNeural","en-US-AndrewNeural","en-US-EmmaNeural","en-US-GuyNeural","en-GB-SoniaNeural","en-GB-RyanNeural","en-GB-LibbyNeural"],
+  hu: ["hu-HU-NoemiNeural","hu-HU-TamasNeural"],
+  de: ["de-DE-KatjaNeural","de-DE-ConradNeural","de-DE-AmalaNeural","de-AT-IngridNeural"],
+  fr: ["fr-FR-DeniseNeural","fr-FR-HenriNeural","fr-FR-VivienneNeural","fr-CA-SylvieNeural"],
+  es: ["es-ES-ElviraNeural","es-ES-AlvaroNeural","es-MX-DaliaNeural"],
+  it: ["it-IT-ElsaNeural","it-IT-IsabellaNeural","it-IT-DiegoNeural"],
+  pt: ["pt-PT-RaquelNeural","pt-PT-DuarteNeural","pt-BR-FranciscaNeural"],
+  sv: ["sv-SE-SofieNeural","sv-SE-MattiasNeural"],
+  da: ["da-DK-ChristelNeural","da-DK-JeppeNeural"],
+  no: ["nb-NO-PernilleNeural","nb-NO-FinnNeural"],
+  pl: ["pl-PL-ZofiaNeural","pl-PL-MarekNeural"],
+  cs: ["cs-CZ-VlastaNeural","cs-CZ-AntoninNeural"],
+  fi: ["fi-FI-SelmaNeural","fi-FI-HarriNeural"],
+  el: ["el-GR-AthinaNeural","el-GR-NestorasNeural"],
+  mk: ["mk-MK-MarijaNeural","mk-MK-AleksandarNeural"],
+  sr: ["sr-RS-SophieNeural","sr-RS-NicholasNeural"]
+};
+const azureVoicesFor = (lang) => AZURE_VOICES[lang] || AZURE_VOICES.en;
+
 // ── PCM helpers ─────────────────────────────────────────────────────────────
 function floatToPcm16Base64(float32) {
   const buf = new ArrayBuffer(float32.length * 2);
@@ -83,11 +123,12 @@ class RealtimeVoice {
 
   url() {
     const V = this.S.voice;
+    const cred = voiceCreds(this.S);
     if (V.engine === "openai") {
       return "wss://api.openai.com/v1/realtime?model=" + encodeURIComponent(V.model || "gpt-4o-realtime-preview");
     }
     // Azure: host may be pasted as https://x.services.ai.azure.com/ or already wss://
-    let host = (V.azureEndpoint || "").trim().replace(/\/+$/, "");
+    let host = (cred.endpoint || "").trim().replace(/\/+$/, "");
     if (!host) throw new Error("Set the Azure VoiceLive endpoint in Settings → Voice");
     host = host.replace(/^https?:\/\//, "wss://");
     if (!/^wss:\/\//.test(host)) host = "wss://" + host;
@@ -97,7 +138,7 @@ class RealtimeVoice {
       model: V.model || "gpt-realtime"
     });
     // A browser cannot set headers on a WebSocket, so the key rides in the query.
-    if (V.azureKey) q.set("api-key", V.azureKey);
+    if (cred.key) q.set("api-key", cred.key);
     return host + "?" + q.toString();
   }
 
@@ -105,7 +146,7 @@ class RealtimeVoice {
     const V = this.S.voice;
     if (V.engine !== "openai") return undefined;
     // OpenAI's documented (and explicitly "insecure") browser auth path.
-    return ["realtime", "openai-insecure-api-key." + (V.openaiKey || ""), "openai-beta.realtime-v1"];
+    return ["realtime", "openai-insecure-api-key." + (voiceCreds(this.S).key || ""), "openai-beta.realtime-v1"];
   }
 
   sessionConfig(instructions) {
@@ -143,8 +184,7 @@ class RealtimeVoice {
 
   async start(instructions) {
     const V = this.S.voice;
-    if (V.engine === "openai" && !V.openaiKey) throw new Error("Set an OpenAI key in Settings → Voice");
-    if (V.engine === "azure" && !V.azureKey) throw new Error("Set an Azure VoiceLive key in Settings → Voice");
+    if (!voiceCreds(this.S).key) throw new Error("Set a key for voice in Settings → Voice mode");
 
     // Microphone first: if this is refused there is no point opening a socket.
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -249,11 +289,73 @@ class RealtimeVoice {
   }
 }
 
+// Does this api-version open at all? Cheap enough to try a handful in sequence.
+function probeVoiceEndpoint(S) {
+  return new Promise((resolve) => {
+    let ws, done = false;
+    const finish = (ok) => { if (done) return; done = true; try { ws && ws.close(); } catch(e){} resolve(ok); };
+    try { ws = new WebSocket(new RealtimeVoice(S, {}).url(), new RealtimeVoice(S, {}).protocols()); }
+    catch(e) { return resolve(false); }
+    ws.onopen = () => finish(true);
+    ws.onerror = () => finish(false);
+    ws.onclose = () => finish(false);
+    setTimeout(() => finish(false), 8000);
+  });
+}
+
+// Play a short sample in the configured voice by running a real one-shot
+// session — the only way to prove the voice name is accepted by the deployment.
+function speakSample(S) {
+  return new Promise((resolve, reject) => {
+    const sample = SPEAK_SAMPLE[S.target] || "Hello, this is how I sound.";
+    let settled = false, client = null;
+    const done = (err) => {
+      if (settled) return; settled = true;
+      setTimeout(() => { try { client && client.stop(); } catch(e){} }, 4000);
+      err ? reject(err) : resolve();
+    };
+    client = new RealtimeVoice(S, {
+      onError: (m) => done(new Error(m)),
+      onState: (st) => { if (st === "speaking") done(null); }
+    });
+    // Skip the microphone entirely for a sample: playback only.
+    client.startAudio = async function () {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      try { this.outCtx = new AC({ sampleRate: RATE }); } catch(e) { this.outCtx = new AC(); }
+      await this.outCtx.resume();
+    };
+    client.stream = null;
+    const origStart = client.start.bind(client);
+    client.start = async function (instr) {
+      const ws = new WebSocket(this.url(), this.protocols());
+      this.ws = ws;
+      await new Promise((res, rej) => {
+        const to = setTimeout(() => rej(new Error("Timed out connecting")), 12000);
+        ws.onopen = () => { clearTimeout(to); res(); };
+        ws.onerror = () => { clearTimeout(to); rej(new Error("Could not connect — check endpoint, key and api-version")); };
+      });
+      ws.onmessage = (ev) => { try { this.handle(JSON.parse(ev.data)); } catch(e){} };
+      const cfg = this.sessionConfig(instr);
+      cfg.turn_detection = null;                 // no microphone in a sample
+      this.send({ type: "session.update", session: cfg });
+      await this.startAudio();
+      this.send({ type: "response.create", response: { modalities: ["audio", "text"],
+        instructions: "Say exactly this and nothing else: " + sample } });
+    };
+    client.start("You are a voice sample. Say only what you are told to say.").catch(done);
+    setTimeout(() => done(new Error("No audio came back — check the voice name and model")), 20000);
+  });
+}
+
 // ── Voice panel ─────────────────────────────────────────────────────────────
 // Owns a session for whichever engine is configured and reports transcript
 // lines back to Lucy so the conversation stays in one place.
-function VoicePanel({ S, instructions, onUser, onAssistant, onClose }) {
+function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
   const T = React.useContext(ThemeCtx);
+  // A local override lets the panel fall back to browser speech without the
+  // user having to go into Settings mid-conversation.
+  const [engineOverride, setEngineOverride] = React.useState(null);
+  const S = engineOverride ? { ...S0, voice: { ...S0.voice, engine: engineOverride } } : S0;
   const V = S.voice || {};
   const realtime = V.engine === "azure" || V.engine === "openai";
   const [state, setState] = React.useState("idle");   // idle|connecting|listening|thinking|speaking
@@ -262,10 +364,20 @@ function VoicePanel({ S, instructions, onUser, onAssistant, onClose }) {
   const clientRef = React.useRef(null);
   const partial = React.useRef("");
 
+  // Every spoken line is also shown translated into both explanation languages,
+  // fetched through the TEXT provider and cached.
+  const addTranslation = (id, text) => {
+    translateLine(text, S).then(tr => {
+      setLines(l => l.map(x => x.id === id ? { ...x, p1: tr.p1, p2: tr.p2 } : x));
+    }).catch(() => {});
+  };
   const push = (role, text) => {
     if (!text || !text.trim()) return;
-    setLines(l => [...l.slice(-40), { role, text: text.trim() }]);
-    (role === "user" ? onUser : onAssistant)(text.trim());
+    const id = Math.random().toString(36).slice(2);
+    const clean = text.trim();
+    setLines(l => [...l.slice(-40), { id, role, text: clean }]);
+    (role === "user" ? onUser : onAssistant)(clean);
+    addTranslation(id, clean);
   };
 
   // ── realtime engines ──
@@ -378,18 +490,28 @@ function VoicePanel({ S, instructions, onUser, onAssistant, onClose }) {
               {realtime ? UI.voiceHintRealtime : UI.voiceHintBrowser}
             </div>
           )}
-          {lines.map((l, i) => (
-            <div key={i} style={{ alignSelf: l.role === "user" ? "flex-end" : "flex-start", maxWidth:"88%",
-              padding:"7px 11px", borderRadius:11, fontSize:13, lineHeight:1.5,
+          {lines.map((l) => (
+            <div key={l.id} style={{ alignSelf: l.role === "user" ? "flex-end" : "flex-start", maxWidth:"90%",
+              padding:"8px 11px", borderRadius:11, fontSize:13, lineHeight:1.5,
               background: l.role === "user" ? T.accent : T.panel2,
               color: l.role === "user" ? T.accentText : T.mute,
               border: l.role === "user" ? "none" : `1px solid ${T.border}`, whiteSpace:"pre-wrap" }}>
-              {l.text}
+              <div style={{ fontWeight: l.role === "user" ? 500 : 600,
+                color: l.role === "user" ? T.accentText : T.text }}>{l.text}</div>
+              {(l.p1 || l.p2) && (
+                <div style={{ marginTop:5, paddingTop:5,
+                  borderTop:`1px dashed ${l.role === "user" ? "#ffffff44" : T.border}` }}>
+                  {l.p1 && <div style={{ fontSize:12, opacity:.9 }}>
+                    <span style={{ opacity:.6, fontSize:10 }}>{langName(S.primary)} · </span>{l.p1}</div>}
+                  {l.p2 && <div style={{ fontSize:12, opacity:.75, fontStyle:"italic", marginTop:2 }}>
+                    <span style={{ opacity:.6, fontSize:10, fontStyle:"normal" }}>{langName(S.secondary)} · </span>{l.p2}</div>}
+                </div>
+              )}
             </div>
           ))}
         </div>
 
-        <div style={{ display:"flex", gap:8 }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {!running ? (
             <button onClick={start} style={{ flex:1, padding:"13px", fontSize:14.5, fontWeight:700, borderRadius:11,
               border:"none", background:T.accent, color:T.accentText, cursor:"pointer" }}>🎙️ {UI.voiceStart}</button>
@@ -397,10 +519,25 @@ function VoicePanel({ S, instructions, onUser, onAssistant, onClose }) {
             <button onClick={stop} style={{ flex:1, padding:"13px", fontSize:14.5, fontWeight:700, borderRadius:11,
               border:`1px solid ${T.bad}`, background:T.badBg, color:T.bad, cursor:"pointer" }}>■ {UI.voiceStop}</button>
           )}
+          {/* Always reachable: if the realtime endpoint is down or slow, this
+              switches the running session to browser speech immediately. */}
+          {realtime && (
+            <button onClick={() => { stop(); setErr(null); setEngineOverride("browser"); }}
+              title={UI.voiceFallbackNote}
+              style={{ padding:"13px 14px", fontSize:12.5, fontWeight:700, borderRadius:11,
+                border:`1px solid ${T.border}`, background:T.panel2, color:T.mute, cursor:"pointer" }}>
+              🔊 {UI.voiceFallback}</button>
+          )}
+          {engineOverride && (
+            <button onClick={() => { stop(); setEngineOverride(null); }}
+              style={{ padding:"13px 14px", fontSize:12.5, borderRadius:11, border:`1px solid ${T.border}`,
+                background:"transparent", color:T.faint, cursor:"pointer" }}>↩</button>
+          )}
         </div>
       </div>
     </React.Fragment>
   );
 }
 
-Object.assign(window, { VOICE_ENGINES, AZURE_VOICE_SUGGESTIONS, OPENAI_VOICES, RealtimeVoice, VoicePanel });
+Object.assign(window, { VOICE_ENGINES, AZURE_VOICE_SUGGESTIONS, AZURE_VOICES, azureVoicesFor, OPENAI_VOICES,
+  VOICE_API_VERSIONS, voiceCreds, probeVoiceEndpoint, speakSample, RealtimeVoice, VoicePanel });

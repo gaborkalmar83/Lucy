@@ -252,15 +252,119 @@ function Field({ label, children }) {
   );
 }
 
+// "Load models" + "Test" under any model selector. Loading proves the key is
+// accepted; Test proves a completion actually comes back, with the latency.
+function ModelTools({ S, T, fetched, setFetched, onLoaded }) {
+  const [busy, setBusy] = React.useState("");
+  const [msg, setMsg] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  const load = async () => {
+    setBusy("load"); setErr(null); setMsg(null);
+    try {
+      const list = await fetchProviderModels(S);
+      setFetched(list);
+      onLoaded && onLoaded(list);
+      setMsg(list.length + " " + UI.modelsFound);
+    } catch(e) { setErr(String(e.message || e)); }
+    setBusy("");
+  };
+  const test = async () => {
+    setBusy("test"); setErr(null); setMsg(null);
+    try {
+      const r = await testProvider(S);
+      setMsg(UI.testOk + " · " + r.ms + "ms · “" + r.reply + "”");
+    } catch(e) { setErr(String(e.message || e)); }
+    setBusy("");
+  };
+
+  const b = (primary) => ({ padding:"7px 12px", fontSize:11.5, fontWeight:700, borderRadius:8,
+    cursor: busy ? "wait" : "pointer", whiteSpace:"nowrap",
+    border: primary ? "none" : `1px solid ${T.border}`,
+    background: primary ? T.accent : T.panel2, color: primary ? T.accentText : T.text });
+
+  return (
+    <div style={{ marginTop:8 }}>
+      <div style={{ display:"flex", gap:7, flexWrap:"wrap", alignItems:"center" }}>
+        <button onClick={load} disabled={!!busy} style={b(false)}>
+          {busy === "load" ? "…" : (fetched.length ? "↻ " : "⬇ ") + UI.loadModels}</button>
+        <button onClick={test} disabled={!!busy} style={b(true)}>
+          {busy === "test" ? "…" : "▶ " + UI.testConn}</button>
+        {fetched.length > 0 && <span style={{ fontSize:10.5, color:T.faint }}>{fetched.length} {UI.modelsFound}</span>}
+      </div>
+      {msg && <div style={{ fontSize:11, color:T.good, marginTop:6, lineHeight:1.5 }}>✓ {msg}</div>}
+      {err && <div style={{ fontSize:11, color:T.bad, marginTop:6, lineHeight:1.5 }}>{err}</div>}
+    </div>
+  );
+}
+
 // Voice is configured on its own: it is a different service from the text
 // model, and only Azure and OpenAI offer a realtime speech API at all.
 function VoiceSettings({ S, setS, T, inp, inp2 }) {
   const V = S.voice;
   const setV = (patch) => setS({ ...S, voice: { ...V, ...patch } });
   const realtime = V.engine === "azure" || V.engine === "openai";
-  const suggestions = V.engine === "openai" ? OPENAI_VOICES : (AZURE_VOICE_SUGGESTIONS[S.target] || []);
   const row = { display:"flex", gap:10, alignItems:"center", marginTop:8, flexWrap:"wrap" };
   const lbl = { fontSize:11, color:T.faint, minWidth:118 };
+
+  // "One provider for everything": voice borrows the text provider's endpoint
+  // and key instead of keeping its own copy.
+  const shared = !!V.sameAsText;
+  const eff = voiceCreds(S);
+  const canShare = (V.engine === "azure" && S.provider === "azure") || (V.engine === "openai" && S.provider === "openai");
+
+  const [vModels, setVModels] = React.useState([]);
+  const [vBusy, setVBusy] = React.useState("");
+  const [vMsg, setVMsg] = React.useState(null);
+  const [vErr, setVErr] = React.useState(null);
+  React.useEffect(() => { setVModels([]); setVMsg(null); setVErr(null); }, [V.engine]);
+
+  const loadVoiceModels = async () => {
+    setVBusy("models"); setVErr(null); setVMsg(null);
+    try {
+      if (V.engine === "azure") {
+        const list = await fetchAzureDeployments(eff.endpoint, eff.key);
+        setVModels(list.map(d => d.id));
+        setVMsg(list.length + " " + UI.modelsFound);
+        if (list.length && !list.some(d => d.id === V.model)) setV({ model:list[0].id });
+      } else {
+        const list = await fetchProviderModels({ ...S, provider:"openai", openaiKey: eff.key });
+        const rt = list.filter(m => /realtime/.test(m));
+        setVModels(rt.length ? rt : list);
+        setVMsg((rt.length ? rt.length : list.length) + " " + UI.modelsFound);
+      }
+    } catch(e) { setVErr(String(e.message || e)); }
+    setVBusy("");
+  };
+
+  // Probe candidate api-versions by actually opening the socket — there is no
+  // discovery endpoint, and this is the only answer that is worth anything.
+  const detectApiVersion = async () => {
+    setVBusy("apiver"); setVErr(null); setVMsg(null);
+    let found = null;
+    for (const ver of VOICE_API_VERSIONS) {
+      const ok = await probeVoiceEndpoint({ ...S, voice: { ...V, azureApiVersion: ver } });
+      if (ok) { found = ver; break; }
+    }
+    if (found) { setV({ azureApiVersion: found }); setVMsg(UI.apiVerFound + " " + found); }
+    else setVErr(UI.apiVerNone);
+    setVBusy("");
+  };
+
+  const testVoice = async () => {
+    setVBusy("voice"); setVErr(null); setVMsg(null);
+    try {
+      if (!realtime) { speak(SPEAK_SAMPLE[S.target] || "Hallo!", S.target, S); setVMsg(UI.voicePlaying); }
+      else { await speakSample(S); setVMsg(UI.voicePlaying); }
+    } catch(e) { setVErr(String(e.message || e)); }
+    setVBusy("");
+  };
+
+  const catalogue = V.engine === "openai" ? OPENAI_VOICES : azureVoicesFor(S.target);
+  const btn = (primary) => ({ padding:"7px 12px", fontSize:11.5, fontWeight:700, borderRadius:8,
+    cursor: vBusy ? "wait" : "pointer", whiteSpace:"nowrap",
+    border: primary ? "none" : `1px solid ${T.border}`,
+    background: primary ? T.accent : T.panel2, color: primary ? T.accentText : T.text });
 
   return (
     <React.Fragment>
@@ -271,70 +375,84 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
         <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.voiceEngineNote}</div>
       </Field>
 
-      {V.engine === "azure" && (
+      {realtime && (
+        <Field label={UI.oneProvider}>
+          <label style={{ display:"flex", alignItems:"flex-start", gap:8, fontSize:12, color:T.text,
+            cursor: canShare ? "pointer" : "not-allowed", opacity: canShare ? 1 : .5 }}>
+            <input type="checkbox" checked={shared} disabled={!canShare}
+              onChange={e => setV({ sameAsText:e.target.checked })} style={{ marginTop:2 }} />
+            <span>{UI.oneProviderNote}
+              {canShare
+                ? <span style={{ color:T.faint }}> — {UI.currently}: {S.provider === "azure" ? azureBase(S.azureEndpoint) : "OpenAI"}</span>
+                : <span style={{ color:T.faint }}> — {UI.oneProviderNA}</span>}
+            </span>
+          </label>
+        </Field>
+      )}
+
+      {V.engine === "azure" && !shared && (
         <React.Fragment>
           <Field label="Azure VoiceLive endpoint">
             <input value={V.azureEndpoint} onChange={e => setV({ azureEndpoint:e.target.value })}
               placeholder="https://my-resource.services.ai.azure.com" style={inp} />
           </Field>
           <Field label={UI.apiKey + " (VoiceLive)"}>
-            <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
-              <input type="password" value={V.azureKey} onChange={e => setV({ azureKey:e.target.value })}
-                placeholder="Azure key" style={{ ...inp, flex:"1 1 180px" }} />
-              {S.azureKey && S.azureKey !== V.azureKey && (
-                <button onClick={() => setV({ azureKey:S.azureKey, azureEndpoint: V.azureEndpoint || S.azureEndpoint })}
-                  style={{ padding:"8px 12px", fontSize:11.5, borderRadius:8, border:`1px solid ${T.border}`,
-                    background:T.panel2, color:T.mute, cursor:"pointer", whiteSpace:"nowrap" }}>↙ {UI.voiceSameAsText}</button>
-              )}
-            </div>
+            <input type="password" value={V.azureKey} onChange={e => setV({ azureKey:e.target.value })}
+              placeholder="Azure key" style={inp} />
           </Field>
-          <div style={row}>
-            <span style={lbl}>model</span>
-            <input value={V.model} onChange={e => setV({ model:e.target.value })} placeholder="gpt-realtime"
-              style={{ ...inp, flex:1 }} />
-          </div>
-          <div style={row}>
-            <span style={lbl}>api-version</span>
-            <input value={V.azureApiVersion} onChange={e => setV({ azureApiVersion:e.target.value })}
-              placeholder="2025-05-01-preview" style={{ ...inp, flex:1 }} />
-          </div>
         </React.Fragment>
       )}
+      {V.engine === "openai" && !shared && (
+        <Field label={UI.apiKey + " (OpenAI Realtime)"}>
+          <input type="password" value={V.openaiKey} onChange={e => setV({ openaiKey:e.target.value })}
+            placeholder="sk-…" style={inp} />
+        </Field>
+      )}
 
-      {V.engine === "openai" && (
-        <React.Fragment>
-          <Field label={UI.apiKey + " (OpenAI Realtime)"}>
-            <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
-              <input type="password" value={V.openaiKey} onChange={e => setV({ openaiKey:e.target.value })}
-                placeholder="sk-…" style={{ ...inp, flex:"1 1 180px" }} />
-              {S.openaiKey && S.openaiKey !== V.openaiKey && (
-                <button onClick={() => setV({ openaiKey:S.openaiKey })}
-                  style={{ padding:"8px 12px", fontSize:11.5, borderRadius:8, border:`1px solid ${T.border}`,
-                    background:T.panel2, color:T.mute, cursor:"pointer", whiteSpace:"nowrap" }}>↙ {UI.voiceSameAsText}</button>
-              )}
-            </div>
-          </Field>
-          <div style={row}>
-            <span style={lbl}>model</span>
-            <input value={V.model} onChange={e => setV({ model:e.target.value })}
-              placeholder="gpt-4o-realtime-preview" style={{ ...inp, flex:1 }} />
+      {realtime && (
+        <Field label={UI.modelLbl + " — " + UI.voiceMode}>
+          <select value={V.model} onChange={e => setV({ model:e.target.value })} style={inp}>
+            {vModels.map(m => <option key={m} value={m}>{m}</option>)}
+            {V.model && !vModels.includes(V.model) && <option value={V.model}>{V.model}  (saved)</option>}
+          </select>
+          <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginTop:8 }}>
+            <button onClick={loadVoiceModels} disabled={!!vBusy} style={btn(false)}>
+              {vBusy === "models" ? "…" : (vModels.length ? "↻ " : "⬇ ") + UI.loadModels}</button>
+            {V.engine === "azure" && (
+              <button onClick={detectApiVersion} disabled={!!vBusy} style={btn(false)}>
+                {vBusy === "apiver" ? "…" : "🔍 " + UI.detectApiVer}</button>
+            )}
           </div>
-        </React.Fragment>
+          {V.engine === "azure" && (
+            <div style={row}>
+              <span style={lbl}>api-version</span>
+              <select value={V.azureApiVersion} onChange={e => setV({ azureApiVersion:e.target.value })}
+                style={{ ...inp, flex:1 }}>
+                {VOICE_API_VERSIONS.map(v => <option key={v} value={v}>{v}</option>)}
+                {V.azureApiVersion && !VOICE_API_VERSIONS.includes(V.azureApiVersion) &&
+                  <option value={V.azureApiVersion}>{V.azureApiVersion}  (saved)</option>}
+              </select>
+            </div>
+          )}
+          {vMsg && <div style={{ fontSize:11, color:T.good, marginTop:7 }}>✓ {vMsg}</div>}
+          {vErr && <div style={{ fontSize:11, color:T.bad, marginTop:7, lineHeight:1.5 }}>{vErr}</div>}
+        </Field>
       )}
 
       <Field label={UI.voiceVoice}>
-        <input value={V.voiceName} onChange={e => setV({ voiceName:e.target.value })}
-          placeholder={realtime ? (suggestions[0] || "voice name") : "uses the browser voice from 🔊 above"}
-          style={inp} disabled={!realtime} />
-        {realtime && suggestions.length > 0 && (
-          <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
-            {suggestions.map(v => (
-              <button key={v} onClick={() => setV({ voiceName:v })} style={{ padding:"3px 9px", fontSize:10.5,
-                borderRadius:6, cursor:"pointer", border:`1px solid ${V.voiceName===v ? T.accent : T.border}`,
-                background: V.voiceName===v ? T.accent+"22" : "transparent", color: V.voiceName===v ? T.accent : T.mute }}>{v}</button>
-            ))}
-          </div>
-        )}
+        <select value={V.voiceName} onChange={e => setV({ voiceName:e.target.value })} style={inp} disabled={!realtime}>
+          <option value="">{realtime ? UI.voicePickOne : UI.voiceBrowserUses}</option>
+          {catalogue.map(v => <option key={v} value={v}>{v}</option>)}
+          {V.voiceName && !catalogue.includes(V.voiceName) && <option value={V.voiceName}>{V.voiceName}  (custom)</option>}
+        </select>
+        <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginTop:8, alignItems:"center" }}>
+          <button onClick={testVoice} disabled={!!vBusy} style={btn(true)}>
+            {vBusy === "voice" ? "…" : "▶ " + UI.voiceHear}</button>
+          {realtime && (
+            <input value={V.voiceName} onChange={e => setV({ voiceName:e.target.value })}
+              placeholder={UI.voiceCustom} style={{ ...inp, flex:"1 1 160px" }} />
+          )}
+        </div>
       </Field>
 
       <Field label={UI.voiceStyleLbl}>
@@ -422,13 +540,16 @@ function Settings({ S, setS, onClose }) {
     if (!c || !c.list.length || Date.now() - c.ts > 864e5) loadOR(true);
   }, [S.provider]);
 
+  const [fetchedModels, setFetchedModels] = React.useState([]);
+  React.useEffect(() => { setFetchedModels([]); }, [S.provider]);
+
   const [azModels, setAzModels] = React.useState([]);
   const [azLoading, setAzLoading] = React.useState(false);
   const [azErr, setAzErr] = React.useState(null);
   const loadAzure = async () => {
     setAzLoading(true); setAzErr(null);
     try {
-      const list = await fetchAzureDeployments(S);
+      const list = await fetchAzureDeployments(S.azureEndpoint, S.azureKey);
       setAzModels(list);
       if (list.length && !list.some(d => d.id === S.azureDeployment)) setS({ ...S, azureDeployment:list[0].id });
       if (!list.length) setAzErr("No deployments found on this resource.");
@@ -485,11 +606,15 @@ function Settings({ S, setS, onClose }) {
             ))}
           </select>
         </Field>
-        {S.provider !== "openrouter" && prov.models.length > 0 && (
+        {S.provider !== "openrouter" && S.provider !== "azure" && (
           <Field label={UI.modelLbl}>
+            {/* Fetched list when the key allows it, the built-in list otherwise. */}
             <select value={S.model} onChange={e => setS({ ...S, model:e.target.value })} style={inp}>
-              {prov.models.map(m => <option key={m} value={m}>{m}</option>)}
+              {(fetchedModels.length ? fetchedModels : prov.models).map(m => <option key={m} value={m}>{m}</option>)}
+              {S.model && ![...(fetchedModels.length ? fetchedModels : prov.models)].includes(S.model) &&
+                <option value={S.model}>{S.model}  (saved)</option>}
             </select>
+            <ModelTools S={S} T={T} fetched={fetchedModels} setFetched={setFetchedModels} />
           </Field>
         )}
         {S.provider === "openrouter" && (() => {
@@ -525,6 +650,7 @@ function Settings({ S, setS, onClose }) {
                   </option>
                 ))}
               </select>
+              <ModelTools S={S} T={T} fetched={[]} setFetched={() => {}} />
               <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>
                 {S.model ? <React.Fragment>Using <b style={{ color:T.mute }}>{S.model}</b>. </React.Fragment> : null}
                 Tiers filter the list; your saved model stays selected either way.
@@ -564,6 +690,7 @@ function Settings({ S, setS, onClose }) {
                 <input value={S.azureDeployment} onChange={e => setS({ ...S, azureDeployment:e.target.value })}
                   placeholder="gpt-4o  (your deployment name)" style={inp} />
               )}
+              <ModelTools S={S} T={T} fetched={fetchedModels} setFetched={setFetchedModels} />
             </Field>
             <Field label="API version">
               <input value={S.azureApiVersion} onChange={e => setS({ ...S, azureApiVersion:e.target.value })}

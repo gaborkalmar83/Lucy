@@ -198,16 +198,67 @@ function azureBase(endpoint) {
 }
 // Azure's data-plane deployment list — the same key that runs completions can
 // read it, so "add key → see your models" works without ARM credentials.
-async function fetchAzureDeployments(S) {
-  const base = azureBase(S.azureEndpoint);
+async function fetchAzureDeployments(endpoint, key) {
+  const base = azureBase(endpoint);
   if (!base) throw new Error("Set the endpoint URL first");
-  if (!S.azureKey) throw new Error("Set the API key first");
+  if (!key) throw new Error("Set the API key first");
   const res = await fetch(base + "/openai/deployments?api-version=2023-03-15-preview",
-    { headers: { "api-key": S.azureKey } });
+    { headers: { "api-key": key } });
   if (!res.ok) throw new Error("Azure " + res.status + ": " + (await res.text()).slice(0,160));
   const j = await res.json();
   return (j.data || []).map(d => ({ id: d.id || d.name, model: (d.model || d.id || "") }))
     .filter(d => d.id).sort((a,b) => a.id.localeCompare(b.id));
+}
+
+// ── Model discovery, per provider ───────────────────────────────────────────
+// Every provider here exposes a list endpoint the same key can read, so nothing
+// has to be typed from memory.
+async function fetchProviderModels(S) {
+  const getJson = async (url, headers) => {
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(res.status + ": " + (await res.text()).slice(0, 160));
+    return res.json();
+  };
+  switch (S.provider) {
+    case "openai": {
+      if (!S.openaiKey) throw new Error("Set the API key first");
+      const d = await getJson("https://api.openai.com/v1/models", { authorization: "Bearer " + S.openaiKey });
+      return (d.data || []).map(m => m.id)
+        .filter(id => /^(gpt|o[134]|chatgpt)/.test(id) && !/audio|realtime|transcribe|tts|embed|moderation|image|dall/.test(id))
+        .sort();
+    }
+    case "anthropic": {
+      if (!S.anthropicKey) throw new Error("Set the API key first");
+      const d = await getJson("https://api.anthropic.com/v1/models?limit=100", {
+        "x-api-key": S.anthropicKey, "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true" });
+      return (d.data || []).map(m => m.id);
+    }
+    case "local": {
+      const base = (S.localUrl || "").replace(/\/$/, "");
+      if (!base) throw new Error("Set the base URL first");
+      const d = await getJson(base + "/models", {});
+      return (d.data || []).map(m => m.id).sort();
+    }
+    case "azure": {
+      const list = await fetchAzureDeployments(S.azureEndpoint, S.azureKey);
+      return list.map(d => d.id);
+    }
+    case "openrouter": {
+      const list = await fetchORModels();
+      return list.map(m => m.id);
+    }
+    default: throw new Error("This provider has no model list");
+  }
+}
+
+// A real round trip, so "it works" is proved rather than assumed.
+async function testProvider(S) {
+  const t0 = performance.now();
+  const { text } = await llmCall(S, { maxTokens: 32, task: "test",
+    system: "Reply with exactly: OK",
+    messages: [{ role: "user", content: "Say OK" }] });
+  return { ok: true, ms: Math.round(performance.now() - t0), reply: (text || "").trim().slice(0, 60) };
 }
 
 // Fetch the live OpenRouter catalogue (public, no key needed) → normalized list with a size/price tier
@@ -546,6 +597,15 @@ const UI_EXTRA = {
     drillLucy:"Drill with Lucy", customPrompt:"Custom instructions",
     customPromptNote:"Added to every request on top of the app's own instructions — useful for things like \"always compare with German\" or \"keep examples about cooking\". It cannot override the output format the app depends on.",
     debugMode:"Debug readout", debugNote:"Shows response time, tokens and tokens-per-second for the last call in the bottom bar.",
+    loadModels:"Load models", testConn:"Test", modelsFound:"available", testOk:"Working",
+    oneProvider:"One provider for everything", oneProviderNA:"only when text and voice use the same vendor",
+    oneProviderNote:"Use my text provider's endpoint and key for voice too, instead of configuring it twice.",
+    currently:"currently", detectApiVer:"Detect", apiVerFound:"Working api-version:",
+    apiVerNone:"None of the known api-versions connected — check the endpoint, key and model.",
+    voiceHear:"Hear this voice", voicePlaying:"Playing sample…", voicePickOne:"pick a voice…",
+    voiceBrowserUses:"uses the browser voice from 🔊 above", voiceCustom:"or type a voice name",
+    voiceFallback:"Browser voice",
+    voiceFallbackNote:"Switch this conversation to browser speech if the realtime endpoint is not responding.",
     voiceMode:"Voice mode", voiceStart:"Start talking", voiceStop:"Stop",
     voiceIdle:"not started", voiceConnecting:"connecting…", voiceListening:"listening",
     voiceThinking:"thinking…", voiceSpeaking:"speaking",
@@ -725,6 +785,26 @@ Give the meaning THIS word has, and translate idiomatically into each language �
   return GLOSS_PENDING[key];
 }
 
+// Translate one spoken line into BOTH explanation languages. Cached, because a
+// voice conversation repeats stock phrases constantly.
+const LINE_CACHE = {};
+async function translateLine(text, S) {
+  const key = `${S.target}|${S.primary}|${S.secondary || "-"}|${text}`;
+  if (LINE_CACHE[key]) return LINE_CACHE[key];
+  const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
+  LINE_CACHE[key] = (async () => {
+    const { text: out } = await llmCall(S, { maxTokens: 300, task: "voice-translate",
+      system: `Translate the line into ${p1}${p2 ? ` and ${p2}` : ""}. Reply with ONLY compact JSON, no fences:
+{"p1":"…"${p2 ? `,"p2":"…"` : ""}}
+Translate the meaning as a native speaker of each language would say it — never word for word.`,
+      messages: [{ role: "user", content: text }] });
+    const m = out.match(/\{[\s\S]*\}/);
+    const j = m ? JSON.parse(m[0]) : {};
+    return { p1: j.p1 || "", p2: j.p2 || "" };
+  })();
+  return LINE_CACHE[key];
+}
+
 // Wraps any target-language word: hover (or tap) shows role + both meanings.
 // The card is rendered into document.body through a portal and positioned with
 // fixed coordinates. Anchoring it inside the word instead meant any scrolling
@@ -838,4 +918,5 @@ Object.assign(window, { CLUSTERS, NODE_INDEX, GRAM_MAPS, setActiveMap, hasMapFor
   LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL,
   ROLES, roleMeaning, roleLabel, lookupWord, HoverWord, cleanWord,
   CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
-  USAGE, useUsage, llmCall, loadUsageLog, USAGE_LOG_KEY, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });
+  USAGE, useUsage, llmCall, loadUsageLog, USAGE_LOG_KEY, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments,
+  fetchProviderModels, testProvider, translateLine, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });
