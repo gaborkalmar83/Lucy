@@ -71,7 +71,21 @@ function ExampleBlock({ ex, S }) {
   );
 }
 
-function Drawer({ target, S, onClose, onOpen, onPractice }) {
+// Exceptions are addressed as "<clusterId>__excN" so Practice can resolve them
+// the same way it resolves a rule node.
+const excPracticeId = (cid, idx) => cid + "__exc" + idx;
+function resolvePractice(id) {
+  if (NODE_INDEX[id]) return { kind:"node", node: NODE_INDEX[id].node, cluster: NODE_INDEX[id].cluster };
+  const m = String(id || "").match(/^(.+)__exc(\d+)$/);
+  if (m) {
+    const cluster = CLUSTERS.find(c => c.id === m[1]);
+    const exc = cluster && (cluster.exceptions || [])[Number(m[2])];
+    if (exc) return { kind:"exception", exc, cluster };
+  }
+  return null;
+}
+
+function Drawer({ target, S, onClose, onOpen, onPractice, onDrill }) {
   const T = React.useContext(ThemeCtx);
   const lang = S.primary, sec = S.secondary;
   if (!target) return null;
@@ -90,6 +104,10 @@ function Drawer({ target, S, onClose, onOpen, onPractice }) {
     const cluster = CLUSTERS.find(c => c.id === target.cid); const e = cluster.exceptions[target.idx];
     title = pick(e,"title"); isExc = true; excBody = pick(e,"body"); excBodySec = pickSec(e,"body"); examples = e.examples || [];
   }
+  const practiceId = isExc ? excPracticeId(target.cid, target.idx) : target.id;
+  const drillPrompt = isExc
+    ? `Let's drill this exception until I have it: "${title}". ${excBody || ""}\nStart by explaining it briefly, then give me one short exercise at a time, wait for my answer, correct it, and keep going.`
+    : `Let's drill this rule until I have it: "${title}". ${rule || ""}\nStart by explaining it briefly, then give me one short exercise at a time, wait for my answer, correct it, and keep going.`;
   return (
     <React.Fragment>
       <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#0006", zIndex:90, backdropFilter:"blur(2px)" }}></div>
@@ -101,15 +119,22 @@ function Drawer({ target, S, onClose, onOpen, onPractice }) {
           <span style={{ flex:1, fontSize:18, fontWeight:800, color:T.text, letterSpacing:-.3 }}>{title}</span>
           <button onClick={onClose} style={{ background:T.chip, border:"none", color:T.mute, width:30, height:30, borderRadius:8, cursor:"pointer", fontSize:15 }}>×</button>
         </div>
-        {!isExc && target.type === "node" && onPractice && (
+        {onPractice && (
           <div style={{ display:"flex", gap:7, marginBottom:14, flexWrap:"wrap" }}>
-            <button onClick={() => { onPractice(target.id); onClose(); }} style={{ padding:"6px 13px", fontSize:12,
+            {/* Practice and drill work for exceptions too — an exception is
+                exactly the kind of thing worth drilling. */}
+            <button onClick={() => onPractice(practiceId)} style={{ padding:"6px 13px", fontSize:12,
               fontWeight:700, borderRadius:9, border:"none", background:T.accent, color:T.accentText, cursor:"pointer" }}>
               ✏️ {UI.practice}</button>
-            <button onClick={() => { navigator.clipboard && navigator.clipboard.writeText(
-              location.href.split("#")[0] + buildHash("map", target.id)); }} title={UI.copyLink}
-              style={{ padding:"6px 12px", fontSize:12, borderRadius:9, border:`1px solid ${T.border}`,
-                background:T.panel2, color:T.mute, cursor:"pointer" }}>🔗</button>
+            <button onClick={() => onDrill && onDrill(drillPrompt)} style={{ padding:"6px 13px", fontSize:12,
+              fontWeight:700, borderRadius:9, border:`1px solid ${T.accent}`, background:"transparent",
+              color:T.accent, cursor:"pointer" }}>✨ {UI.drillLucy}</button>
+            {!isExc && (
+              <button onClick={() => { navigator.clipboard && navigator.clipboard.writeText(
+                location.href.split("#")[0] + buildHash("map", target.id)); }} title={UI.copyLink}
+                style={{ padding:"6px 12px", fontSize:12, borderRadius:9, border:`1px solid ${T.border}`,
+                  background:T.panel2, color:T.mute, cursor:"pointer" }}>🔗</button>
+            )}
           </div>
         )}
         {isExc ? (
@@ -468,6 +493,20 @@ function Settings({ S, setS, onClose }) {
           <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.readerProxyNote}</div>
         </Field>
 
+        <Field label={"📝 " + UI.customPrompt}>
+          <textarea value={S.systemExtra} onChange={e => setS({ ...S, systemExtra:e.target.value })}
+            placeholder="e.g. Always compare Dutch word order with German. Keep examples about cooking."
+            style={{ ...inp, minHeight:70, resize:"vertical", fontFamily:"'IBM Plex Sans',sans-serif" }} />
+          <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.customPromptNote}</div>
+        </Field>
+
+        <Field label={"🐞 " + UI.debugMode}>
+          <label style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, color:T.text, cursor:"pointer" }}>
+            <input type="checkbox" checked={!!S.debug} onChange={e => setS({ ...S, debug:e.target.checked })} />
+            {UI.debugNote}
+          </label>
+        </Field>
+
         <Field label={"🔁 " + UI.dailyGoalLbl}>
           <div style={{ display:"flex", gap:10, alignItems:"center" }}>
             <input type="range" min="5" max="100" step="5" value={S.dailyGoal}
@@ -561,6 +600,11 @@ function BottomBar({ S, dueCount, nav }) {
             style={{ padding:"2px 9px", fontSize:10, fontWeight:700, borderRadius:99, cursor:"pointer",
               border:`1px solid ${T.accent}66`, background:T.accent+"1a", color:T.accent,
               fontFamily:"'JetBrains Mono',monospace" }}>🔁 {dueCount} {UI.due}</button>
+        )}
+        {S.debug && u.calls > 0 && (
+          <span style={{ color:"#f59e0b" }} title="last call: time · in/out tokens · output tokens per second">
+            🐞 {u.lastMs}ms ↑{u.lastIn} ↓{u.lastOut} {u.lastTps ? u.lastTps.toFixed(1)+" tok/s" : ""}
+          </span>
         )}
         {u.calls > 0 ? (
           <React.Fragment>
@@ -796,7 +840,9 @@ function App() {
         {view === "reader" && <Reader S={S} nav={nav} setLabInput={setLabInput} setLucySeed={setLucySeed} />}
         {view === "practice" && <Practice S={S} ruleId={route.arg} nav={nav} onOpenNode={openNode} />}
 
-        <Drawer target={drawer} S={S} onClose={closeDrawer} onOpen={openNode} onPractice={id => nav("practice", id)} />
+        <Drawer target={drawer} S={S} onClose={closeDrawer} onOpen={openNode}
+          onPractice={id => { setDrawer(null); nav("practice", id); }}
+          onDrill={prompt => { setDrawer(null); setLucySeed(prompt); nav("lucy"); }} />
         {showSettings && <Settings S={S} setS={setS} onClose={() => setShowSettings(false)} />}
         <CommandPalette open={palette} setOpen={setPalette} S={S} nav={nav} onOpenNode={openNode}
           onSettings={() => setShowSettings(true)} />

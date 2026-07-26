@@ -324,10 +324,76 @@ function Progress({ S, nav, onOpenNode }) {
         </div>
       )}
 
-      {u.calls > 0 && (
-        <div style={{ marginTop:16, fontSize:11, color:T.faint, fontFamily:"'JetBrains Mono',monospace" }}>
-          ◈ {(u.in+u.out).toLocaleString()} {UI.tokens} · {u.calls} calls · {u.last}
-        </div>
+      <UsageReport T={T} />
+    </div>
+  );
+}
+
+// ── Model usage: what was spent, on which provider and model ────────────────
+function UsageReport({ T }) {
+  const [days, setDays] = React.useState(7);
+  const log = React.useMemo(() => loadUsageLog(), []);
+  const since = Date.now() - days * 86400000;
+  const rows = log.filter(e => e.ts >= since);
+
+  const byModel = {};
+  let tIn = 0, tOut = 0, tMs = 0;
+  rows.forEach(e => {
+    const k = (e.provider || "?") + " · " + (e.model || "?");
+    const b = byModel[k] || (byModel[k] = { calls:0, in:0, out:0, ms:0 });
+    b.calls++; b.in += e.in || 0; b.out += e.out || 0; b.ms += e.ms || 0;
+    tIn += e.in || 0; tOut += e.out || 0; tMs += e.ms || 0;
+  });
+  const list = Object.entries(byModel).sort((a,b) => (b[1].in + b[1].out) - (a[1].in + a[1].out));
+  const tps = tMs > 0 ? (tOut / (tMs / 1000)) : 0;
+
+  return (
+    <div style={{ marginTop:16, padding:"14px 16px", borderRadius:12, background:T.panel, border:`1px solid ${T.border}` }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:10 }}>
+        <span style={{ fontSize:10, color:T.faint, fontFamily:"'JetBrains Mono',monospace", letterSpacing:1.4 }}>
+          {UI.modelUsage.toUpperCase()}</span>
+        <span style={{ flex:1 }}></span>
+        {[[1,"24h"],[7,"7d"],[30,"30d"]].map(([d,l]) => (
+          <button key={d} onClick={() => setDays(d)} style={{ padding:"3px 11px", fontSize:11, fontWeight:700,
+            borderRadius:7, cursor:"pointer", border:`1px solid ${days===d ? T.accent : T.border}`,
+            background: days===d ? T.accent+"22" : "transparent", color: days===d ? T.accent : T.mute }}>{l}</button>
+        ))}
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ fontSize:12.5, color:T.faint }}>{UI.noLlm}</div>
+      ) : (
+        <React.Fragment>
+          <div style={{ display:"flex", gap:14, flexWrap:"wrap", fontSize:12, color:T.mute,
+            fontFamily:"'JetBrains Mono',monospace", marginBottom:10 }}>
+            <span style={{ color:T.accent }}>◈ {(tIn+tOut).toLocaleString()} {UI.tokens}</span>
+            <span>↑{tIn.toLocaleString()}</span>
+            <span>↓{tOut.toLocaleString()}</span>
+            <span>{rows.length} calls</span>
+            {tps > 0 && <span>{tps.toFixed(1)} tok/s avg</span>}
+          </div>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ borderCollapse:"collapse", fontSize:11.5, width:"100%", minWidth:400 }}>
+              <tbody>
+                <tr>{[UI.modelLbl, "calls", "↑ in", "↓ out", "tok/s"].map((h,i) => (
+                  <th key={i} style={{ textAlign: i===0?"left":"right", padding:"4px 8px", color:T.faint,
+                    fontFamily:"'JetBrains Mono',monospace", fontWeight:500, borderBottom:`1px solid ${T.border}` }}>{h}</th>
+                ))}</tr>
+                {list.map(([k, b]) => (
+                  <tr key={k}>
+                    <td style={{ padding:"4px 8px", color:T.text, borderBottom:`1px solid ${T.border}44` }}>{k}</td>
+                    {[b.calls, b.in.toLocaleString(), b.out.toLocaleString(),
+                      b.ms > 0 ? (b.out/(b.ms/1000)).toFixed(1) : "—"].map((v,i) => (
+                      <td key={i} style={{ padding:"4px 8px", textAlign:"right", color:T.mute,
+                        fontFamily:"'JetBrains Mono',monospace", borderBottom:`1px solid ${T.border}44` }}>{v}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize:10, color:T.faint, marginTop:8 }}>{UI.usageNote}</div>
+        </React.Fragment>
       )}
     </div>
   );
@@ -338,39 +404,35 @@ const sentencesOf = (text) =>
   // No lookbehind: Safari before 16.4 throws on it.
   (String(text).match(/[^.!?…\n]+[.!?…]*/g) || []).map(s => s.trim()).filter(Boolean);
 
-// A sentence row: target language on the left, translation + roles on the right.
-function ReaderRow({ sentence, idx, S, nav, setLabInput, setLucySeed, onSave, mobile }) {
-  const T = React.useContext(ThemeCtx);
-  const [trans, setTrans] = React.useState(null);   // null | "loading" | {p1,p2,tokens}
+// One call per sentence returns an idiomatic translation in BOTH explanation
+// languages plus role tags for the original. Roles are only *shown* when the
+// global toggle is on, or when this row was asked for them explicitly.
+async function analyseSentence(sentence, S) {
   const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
-
-  const translate = async () => {
-    if (trans && trans !== "err") return;
-    setTrans("loading");
-    const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
-    try {
-      const { text } = await llmCall(S, { maxTokens: 700,
-        system: `You translate one ${tgt.name} sentence for a learner and label its grammar.
+  const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
+  const { text } = await llmCall(S, { maxTokens: 700, task: "reader",
+    system: `You translate one ${tgt.name} sentence for a learner and label its grammar.
 Reply with ONLY compact JSON, no fences:
 {"p1":"idiomatic ${p1} translation"${p2 ? `,"p2":"idiomatic ${p2} translation"` : ""},"tokens":[["word","role"],…]}
-roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x — tokens must cover every word of the ORIGINAL sentence in order.
-Translate the MEANING as a native speaker of each language would say it. Never translate word for word; match each language's own word order and idiom.`,
-        messages: [{ role:"user", content: sentence }] });
-      const m = text.match(/\{[\s\S]*\}/);
-      const j = m ? JSON.parse(m[0]) : {};
-      setTrans({ p1: j.p1 || "", p2: j.p2 || "", tokens: Array.isArray(j.tokens) ? j.tokens : null });
-      bumpDay({ lessons: 1 });
-    } catch(e) { setTrans("err"); }
-  };
+roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x — tokens must cover every word of the ORIGINAL ${tgt.name} sentence, in order, so its word order can be colour-coded.
+Translate the MEANING as a native speaker of each language would say it. Never translate word for word; use each language's own word order and idiom.`,
+    messages: [{ role:"user", content: sentence }] });
+  const m = text.match(/\{[\s\S]*\}/);
+  const j = m ? JSON.parse(m[0]) : {};
+  return { p1: j.p1 || "", p2: j.p2 || "", tokens: Array.isArray(j.tokens) ? j.tokens : null };
+}
 
+function ReaderRow({ sentence, idx, S, row, onRun, nav, setLabInput, setLucySeed, onSave, mobile }) {
+  const T = React.useContext(ThemeCtx);
+  const st = row && row.status;
+  const showRoles = (S.showRoles || (row && row.roles)) && row && row.tokens;
   const words = sentence.split(/(\s+)/);
-  const tokens = trans && trans.tokens;
 
   const left = (
     <div style={{ flex:"1 1 0", minWidth:0, padding:"11px 13px" }}>
       <div style={{ fontSize:15.5, color:T.text, lineHeight:2 }}>
-        {S.showRoles && tokens
-          ? <Tokens tokens={tokens} size={15} S={S} onSave={onSave} />
+        {showRoles
+          ? <Tokens tokens={row.tokens} size={15} S={S} onSave={onSave} />
           : words.map((w, wi) => /^\s+$/.test(w) || !w ? w
               : <HoverWord key={wi} word={w} S={S} onSave={onSave}
                   style={{ borderBottom:`1px dotted ${T.faint}55` }} />)}
@@ -378,8 +440,14 @@ Translate the MEANING as a native speaker of each language would say it. Never t
       <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap", alignItems:"center" }}>
         <span style={{ fontSize:10, color:T.faint, fontFamily:"'JetBrains Mono',monospace" }}>{idx + 1}</span>
         <SpeakBtn text={sentence} S={S} size={13} />
-        <button onClick={translate} style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>
-          {trans === "loading" ? "…" : "🌐 " + UI.translate}</button>
+        <button onClick={() => onRun(idx, false)} style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>
+          {st === "loading" ? "…" : "🌐 " + UI.translate}</button>
+        {!S.showRoles && (
+          <button onClick={() => onRun(idx, true)} title={UI.runRolesHint}
+            style={{ ...btn(T), fontSize:10.5, padding:"3px 9px",
+              border:`1px solid ${row && row.roles ? T.accent : T.border}`,
+              color: row && row.roles ? T.accent : T.mute }}>🎨 {UI.runRoles}</button>
+        )}
         <button onClick={() => { setLabInput(sentence); nav("lab"); }}
           style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>🔬 {UI.analyze}</button>
         <button onClick={() => { setLucySeed("Explain this sentence for my level: " + sentence); nav("lucy"); }}
@@ -393,22 +461,23 @@ Translate the MEANING as a native speaker of each language would say it. Never t
       borderLeft: mobile ? "none" : `1px solid ${T.border}`,
       borderTop: mobile ? `1px dashed ${T.border}` : "none",
       background: T.panel2 + "80" }}>
-      {!trans && <button onClick={translate} style={{ ...btn(T), fontSize:11 }}>🌐 {UI.translate}</button>}
-      {trans === "loading" && <span style={{ color:T.faint, fontSize:13 }}>…</span>}
-      {trans === "err" && <span style={{ color:T.bad, fontSize:12 }}>{UI.errFail}</span>}
-      {trans && trans !== "loading" && trans !== "err" && (
+      {!row && <button onClick={() => onRun(idx, false)} style={{ ...btn(T), fontSize:11 }}>🌐 {UI.translate}</button>}
+      {st === "loading" && <span style={{ color:T.faint, fontSize:13 }}>…</span>}
+      {st === "err" && <span style={{ color:T.bad, fontSize:12 }}>{UI.errFail}</span>}
+      {st === "done" && (
         <React.Fragment>
-          <div style={{ fontSize:14, color:T.mute, lineHeight:1.6 }}>{trans.p1}</div>
-          {trans.p2 && <div style={{ fontSize:13, color:T.faint, lineHeight:1.55, marginTop:5,
-            fontStyle:"italic", borderTop:`1px dashed ${T.border}`, paddingTop:5 }}>{trans.p2}</div>}
+          <div style={{ fontSize:14, color:T.mute, lineHeight:1.6 }}>{row.p1}</div>
+          {row.p2 && <div style={{ fontSize:13, color:T.faint, lineHeight:1.55, marginTop:5,
+            fontStyle:"italic", borderTop:`1px dashed ${T.border}`, paddingTop:5 }}>{row.p2}</div>}
         </React.Fragment>
       )}
     </div>
   );
 
+  // No overflow:hidden — it clipped the word-gloss cards.
   return (
     <div style={{ display:"flex", flexDirection: mobile ? "column" : "row", borderRadius:11,
-      background:T.panel, border:`1px solid ${T.border}`, overflow:"hidden" }}>
+      background:T.panel, border:`1px solid ${T.border}` }}>
       {left}{right}
     </div>
   );
@@ -423,9 +492,47 @@ function Reader({ S, nav, setLabInput, setLucySeed }) {
   const [fetching, setFetching] = React.useState(false);
   const [fetchErr, setFetchErr] = React.useState(null);
   const [vocab, setVocab] = React.useState(() => jget(KEYS.vocab, []));
+  const [rows, setRows] = React.useState({});          // idx → {status,p1,p2,tokens,roles}
+  const [bulk, setBulk] = React.useState(null);        // {done,total} while translating all
+  const cancelBulk = React.useRef(false);
   const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
 
   const sentences = React.useMemo(() => sentencesOf(text), [text]);
+  React.useEffect(() => { setRows({}); setBulk(null); }, [text]);   // new text → drop cached rows
+
+  const runRow = React.useCallback(async (idx, wantRoles) => {
+    const sentence = sentences[idx];
+    if (!sentence) return;
+    let skip = false;
+    setRows(r => {
+      const cur = r[idx];
+      if (cur && cur.status === "loading") { skip = true; return r; }
+      if (cur && cur.status === "done") { skip = true; return wantRoles ? { ...r, [idx]: { ...cur, roles:true } } : r; }
+      return { ...r, [idx]: { status:"loading", roles: !!wantRoles } };
+    });
+    if (skip) return;
+    try {
+      const out = await analyseSentence(sentence, S);
+      setRows(r => ({ ...r, [idx]: { ...out, status:"done", roles: !!wantRoles || !!(r[idx] && r[idx].roles) } }));
+      bumpDay({ lessons: 1 });
+    } catch(e) {
+      setRows(r => ({ ...r, [idx]: { status:"err" } }));
+    }
+  }, [sentences, S]);
+
+  // Sequential on purpose: a 60-sentence article fired in parallel trips the
+  // rate limit on every free tier there is.
+  const runAll = async () => {
+    cancelBulk.current = false;
+    const todo = sentences.map((_, i) => i).filter(i => !rows[i] || rows[i].status !== "done");
+    setBulk({ done: 0, total: todo.length });
+    for (let n = 0; n < todo.length; n++) {
+      if (cancelBulk.current) break;
+      await runRow(todo[n], S.showRoles);
+      setBulk({ done: n + 1, total: todo.length });
+    }
+    setBulk(null);
+  };
 
   const addVocab = (v) => {
     const n = [{ ...v, lang:S.target, ts:Date.now() }, ...vocab.filter(x => x.term !== v.term)];
@@ -457,8 +564,9 @@ function Reader({ S, nav, setLabInput, setLucySeed }) {
                  .replace(/[#*_>`]/g, "")
                  .replace(/\n{3,}/g, "\n\n").trim();
       if (!body) throw new Error("nothing readable came back");
+      // Stay in edit mode: the text lands in the box so it can be checked and
+      // trimmed before committing to a reading session.
       setText(body.slice(0, 20000));
-      setEditing(false);
     } catch(e) {
       setFetchErr(String(e.message || e) + " — " + UI.readerFetchHint);
     }
@@ -512,10 +620,19 @@ function Reader({ S, nav, setLabInput, setLucySeed }) {
             fontSize:11, color:T.faint }}>
             <span>{sentences.length} {UI.sentences}</span>
             <span>· {UI.hoverHint}</span>
+            <span style={{ flex:1 }}></span>
+            {bulk ? (
+              <React.Fragment>
+                <span style={{ color:T.accent }}>{bulk.done} / {bulk.total}</span>
+                <button onClick={() => { cancelBulk.current = true; }} style={{ ...btn(T), fontSize:11 }}>{UI.stopSpeak}</button>
+              </React.Fragment>
+            ) : (
+              <button onClick={runAll} style={{ ...btn(T, true), fontSize:11.5 }}>🌐 {UI.translateAll}</button>
+            )}
           </div>
           <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:10 }}>
             {sentences.map((s, si) => (
-              <ReaderRow key={si} sentence={s} idx={si} S={S} nav={nav} mobile={mobile}
+              <ReaderRow key={si} sentence={s} idx={si} S={S} nav={nav} mobile={mobile} row={rows[si]} onRun={runRow}
                 setLabInput={setLabInput} setLucySeed={setLucySeed} onSave={addVocab} />
             ))}
           </div>
@@ -528,7 +645,13 @@ function Reader({ S, nav, setLabInput, setLucySeed }) {
 // ── Practice: LLM-generated drills for one grammar rule ──────────────────────
 function Practice({ S, ruleId, nav, onOpenNode }) {
   const T = React.useContext(ThemeCtx);
-  const entry = NODE_INDEX[ruleId];
+  // An id may name a rule node or an exception ("<cluster>__excN") — exceptions
+  // are exactly the sort of thing worth drilling, so both get drills.
+  const res = resolvePractice(ruleId);
+  const isExc = !!(res && res.kind === "exception");
+  const entry = res && res.kind === "node" ? { node: res.node } : null;
+  const excTitle = isExc ? (res.exc["title_" + S.primary] || res.exc.title_en) : "";
+  const excBody = isExc ? (res.exc["body_" + S.primary] || res.exc.body_en) : "";
   const [drill, setDrill] = React.useState(null);
   const [answers, setAnswers] = React.useState({});
   const [checked, setChecked] = React.useState(false);
@@ -541,6 +664,8 @@ function Practice({ S, ruleId, nav, onOpenNode }) {
     try {
       const ctx = entry
         ? `RULE: ${entry.node.label_en} [${entry.node.level}]\n${entry.node.rule_en}`
+        : isExc
+        ? `EXCEPTION / PITFALL: ${res.exc.title_en}\n${res.exc.body_en}\nEvery item must hinge on exactly this exception.`
         : `Pick a grammar point suitable for CEFR ${S.level}.`;
       const { text } = await llmCall(S, { maxTokens:1400,
         system:`You write short grammar drills for a ${tgt.name} learner at CEFR ${S.level}. Explanations in ${langName(S.primary)}.
@@ -575,6 +700,16 @@ Exactly 5 items. Each has 3 plausible options. The answer must be one of the opt
         <div style={{ fontSize:20, fontWeight:800, color:T.text, letterSpacing:-.4 }}>✏️ {UI.practiceTitle}</div>
       </div>
 
+      {isExc && (
+        <div style={{ marginTop:14, padding:"13px 15px", borderRadius:12, background:T.badBg, border:`1px solid ${T.badBd}` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:9, flexWrap:"wrap" }}>
+            <span style={{ fontSize:11, fontWeight:700, color:T.bad, fontFamily:"'JetBrains Mono',monospace",
+              border:`1px solid ${T.bad}55`, borderRadius:4, padding:"2px 7px" }}>⚠ {UI.exception}</span>
+            <span style={{ flex:1, fontSize:15, fontWeight:800, color:T.text }}>{excTitle}</span>
+          </div>
+          <div style={{ fontSize:13, color:T.mute, marginTop:7, lineHeight:1.6 }}>{excBody}</div>
+        </div>
+      )}
       {entry && (
         <div style={{ marginTop:14, padding:"13px 15px", borderRadius:12, background:T.panel, border:`1px solid ${T.border}` }}>
           <div style={{ display:"flex", alignItems:"center", gap:9 }}>

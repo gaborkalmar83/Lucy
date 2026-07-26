@@ -150,7 +150,9 @@ const DEFAULT_SETTINGS = {
   dailyGoal:20,                                // SRS cards/day
   reduceMotion:false,
   rolesLang:"primary",                         // which language the roles bar shows
-  readerProxy:"https://r.jina.ai/"             // used to fetch article text past CORS
+  readerProxy:"https://r.jina.ai/",            // used to fetch article text past CORS
+  systemExtra:"",                              // appended to every system prompt
+  debug:false                                  // show timing / tokens / tok-per-sec
 };
 const DONATE_URL = "https://buymeacoffee.com/gaborkalmar";
 function loadSettings(){
@@ -225,9 +227,33 @@ function loadORCache() {
 function saveORCache(list) {
   try { localStorage.setItem(OR_CACHE_KEY, JSON.stringify({ ts:Date.now(), list })); } catch(e){}
 }
-const USAGE = { in:0, out:0, calls:0, last:"", subs:new Set() };
+const USAGE = { in:0, out:0, calls:0, last:"", lastMs:0, lastTps:0, lastIn:0, lastOut:0, subs:new Set() };
 const estTok = (s) => Math.ceil((s||"").length/4);
-function bumpUsage(inTok, outTok, label){ USAGE.in+=inTok; USAGE.out+=outTok; USAGE.calls++; USAGE.last=label; USAGE.subs.forEach(f=>f()); }
+
+// Every call is appended to a rolling on-device log so Progress can break usage
+// down by provider and model over the last day / week / month.
+const USAGE_LOG_KEY = "lm3:usageLog";
+function loadUsageLog() {
+  try { const l = JSON.parse(localStorage.getItem(USAGE_LOG_KEY) || "[]"); return Array.isArray(l) ? l : []; }
+  catch(e){ return []; }
+}
+function logUsage(entry) {
+  try {
+    const cutoff = Date.now() - 90 * 86400000;                 // keep 90 days, cap the size
+    const kept = loadUsageLog().filter(e => e.ts > cutoff).slice(-5000);
+    kept.push(entry);
+    localStorage.setItem(USAGE_LOG_KEY, JSON.stringify(kept));
+  } catch(e){}
+}
+function bumpUsage(inTok, outTok, label, meta) {
+  USAGE.in += inTok; USAGE.out += outTok; USAGE.calls++; USAGE.last = label;
+  USAGE.lastIn = inTok; USAGE.lastOut = outTok;
+  USAGE.lastMs = (meta && meta.ms) || 0;
+  USAGE.lastTps = USAGE.lastMs > 0 ? outTok / (USAGE.lastMs / 1000) : 0;
+  logUsage({ ts: Date.now(), provider: (meta && meta.provider) || "", model: (meta && meta.model) || label,
+    in: inTok, out: outTok, ms: USAGE.lastMs, task: (meta && meta.task) || "" });
+  USAGE.subs.forEach(f => f());
+}
 function useUsage(){ const [,f] = React.useReducer(x=>x+1,0);
   React.useEffect(() => { USAGE.subs.add(f); return () => USAGE.subs.delete(f); }, []); return USAGE; }
 
@@ -250,14 +276,23 @@ function providerReady(S) {
 }
 
 // unified LLM call → { text }
-async function llmCall(S, { system, messages, maxTokens=2000 }) {
-  const label = S.provider + " · " + (S.provider==="local" ? (S.localModel||"local")
-    : S.provider==="azure" ? (S.azureDeployment||"azure") : S.model);
+async function llmCall(S, { system, messages, maxTokens=2000, task="" }) {
+  const modelName = S.provider==="local" ? (S.localModel||"local")
+    : S.provider==="azure" ? (S.azureDeployment||"azure") : S.model;
+  const label = S.provider + " · " + modelName;
+  // A user-supplied prompt is appended, never substituted, so the app's own
+  // output contract (JSON shapes, correction format) cannot be broken by it.
+  if (S.systemExtra && S.systemExtra.trim()) {
+    system = system + "\n\nADDITIONAL INSTRUCTIONS FROM THE LEARNER (follow these too, but never at the expense of the output format required above):\n" + S.systemExtra.trim();
+  }
+  const meta = { provider:S.provider, model:modelName, task };
+  const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const took = () => Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0);
   const inEst = estTok(system) + estTok(messages.map(m=>m.content).join(" "));
   if (S.provider === "builtin") {
     if (!builtinAvailable()) throw new Error(UI.builtinMissing);
     const text = await window.claude.complete({ model:S.model, max_tokens:maxTokens, system, messages });
-    bumpUsage(inEst, estTok(text), label);
+    bumpUsage(inEst, estTok(text), label, { ...meta, ms:took() });
     return { text };
   }
   let url, headers, body, extract, usageOf;
@@ -292,7 +327,7 @@ async function llmCall(S, { system, messages, maxTokens=2000 }) {
   const j = await res.json();
   const text = extract(j);
   const u = usageOf(j);
-  bumpUsage(u ? u[0] : inEst, u ? u[1] : estTok(text), label);
+  bumpUsage(u ? u[0] : inEst, u ? u[1] : estTok(text), label, { ...meta, ms:took() });
   return { text };
 }
 
@@ -489,6 +524,11 @@ const UI_EXTRA = {
     hoverHint:"hover a word for its meaning and role", rolesBarLang:"Roles bar language", primaryLbl:"Primary", secondaryLbl:"Secondary",
     readerFetchHint:"the site may block outside access; try pasting the text instead", readerProxyNote:"Fetching sends the URL to the text-extraction service in Settings (default r.jina.ai). Clear that field to fetch directly — most news sites will refuse. Pasting text never contacts anyone.",
     support:"Support this project", supportNote:"LinguaMap is free and open source. If it helps you, you can buy me a coffee.",
+    translateAll:"Translate all", runRoles:"Run roles", runRolesHint:"Colour-code this sentence by word role and translate it into both explanation languages",
+    modelUsage:"Model usage", usageNote:"Counted on this device only. Token figures come from the provider when it reports them, otherwise they are estimated.",
+    drillLucy:"Drill with Lucy", customPrompt:"Custom instructions",
+    customPromptNote:"Added to every request on top of the app's own instructions — useful for things like \"always compare with German\" or \"keep examples about cooking\". It cannot override the output format the app depends on.",
+    debugMode:"Debug readout", debugNote:"Shows response time, tokens and tokens-per-second for the last call in the bottom bar.",
     due:"due", newCards:"new", noDue:"Nothing due — you're all caught up.", startReview:"Start review",
     again:"Again", hard:"Hard", good:"Good", easy:"Easy", showAnswer:"Show answer", endSession:"Finish",
     reviewDone:"Session complete", cardsLeft:"left", streak:"Streak", days:"days", xp:"XP",
@@ -515,6 +555,11 @@ const UI_EXTRA = {
     hoverHint:"vidd a szó fölé a jelentésért és szerepért", rolesBarLang:"Szerepek sáv nyelve", primaryLbl:"Elsődleges", secondaryLbl:"Másodlagos",
     readerFetchHint:"az oldal blokkolhatja a külső hozzáférést; próbáld beilleszteni a szöveget", readerProxyNote:"A letöltés elküldi az URL-t a Beállításokban megadott szolgáltatásnak (alapértelmezés: r.jina.ai). Írd üresre a közvetlen letöltéshez — a legtöbb híroldal ezt megtagadja. A beillesztés soha nem küld adatot.",
     support:"Támogasd a projektet", supportNote:"A LinguaMap ingyenes és nyílt forrású. Ha hasznos, meghívhatsz egy kávéra.",
+    translateAll:"Mind lefordítása", runRoles:"Szerepek", runRolesHint:"Színkódolja a mondatot szófaji szerep szerint, és lefordítja mindkét magyarázó nyelvre",
+    modelUsage:"Modellhasználat", usageNote:"Csak ezen az eszközön számolva. A tokenszámok a szolgáltatótól jönnek, ha jelenti őket, egyébként becsültek.",
+    drillLucy:"Gyakorlás Lucyval", customPrompt:"Egyéni utasítások",
+    customPromptNote:"Minden kéréshez hozzáadódik az alkalmazás saját utasításai mellé — például „mindig hasonlítsd össze a némettel”. A kimeneti formátumot nem írhatja felül.",
+    debugMode:"Hibakeresési adatok", debugNote:"Az utolsó hívás válaszidejét, tokenszámát és token/másodperc értékét mutatja az alsó sávban.",
     due:"esedékes", newCards:"új", noDue:"Nincs esedékes kártya — mindennel megvagy.", startReview:"Ismétlés indítása",
     again:"Újra", hard:"Nehéz", good:"Jó", easy:"Könnyű", showAnswer:"Megoldás", endSession:"Befejezés",
     reviewDone:"Kész a kör", cardsLeft:"maradt", streak:"Sorozat", days:"nap", xp:"XP",
@@ -541,6 +586,11 @@ const UI_EXTRA = {
     hoverHint:"beweeg over een woord voor betekenis en rol", rolesBarLang:"Taal van de rollenbalk", primaryLbl:"Primair", secondaryLbl:"Secundair",
     readerFetchHint:"de site blokkeert mogelijk externe toegang; plak anders de tekst", readerProxyNote:"Ophalen stuurt de URL naar de tekstdienst uit Instellingen (standaard r.jina.ai). Maak dat veld leeg om direct op te halen — de meeste nieuwssites weigeren dat. Plakken verstuurt nooit iets.",
     support:"Steun dit project", supportNote:"LinguaMap is gratis en open source. Als het je helpt, kun je me een koffie aanbieden.",
+    translateAll:"Alles vertalen", runRoles:"Rollen tonen", runRolesHint:"Kleur deze zin per woordrol en vertaal hem naar beide uitlegtalen",
+    modelUsage:"Modelgebruik", usageNote:"Alleen op dit apparaat geteld. Tokenaantallen komen van de provider als die ze meldt, anders zijn ze geschat.",
+    drillLucy:"Oefenen met Lucy", customPrompt:"Eigen instructies",
+    customPromptNote:"Wordt bij elke aanvraag toegevoegd naast de eigen instructies van de app. Het kan het vereiste uitvoerformaat niet overschrijven.",
+    debugMode:"Debug-info", debugNote:"Toont responstijd, tokens en tokens per seconde van de laatste aanroep in de onderbalk.",
     due:"te doen", newCards:"nieuw", noDue:"Niets te herhalen — je bent bij.", startReview:"Start herhaling",
     again:"Opnieuw", hard:"Moeilijk", good:"Goed", easy:"Makkelijk", showAnswer:"Toon antwoord", endSession:"Klaar",
     reviewDone:"Sessie klaar", cardsLeft:"over", streak:"Reeks", days:"dagen", xp:"XP",
@@ -647,55 +697,88 @@ Give the meaning THIS word has, and translate idiomatically into each language �
 }
 
 // Wraps any target-language word: hover (or tap) shows role + both meanings.
+// The card is rendered into document.body through a portal and positioned with
+// fixed coordinates. Anchoring it inside the word instead meant any scrolling
+// or rounded-corner ancestor (the reader rows, the map drawer, Lucy's bubbles)
+// clipped it — which it did, constantly.
 function HoverWord({ word, role, S, onSave, color, style, children }) {
   const T = React.useContext(ThemeCtx);
   const [state, setState] = React.useState(null);   // null | "loading" | gloss | "err"
+  const [pos, setPos] = React.useState(null);
   const timer = React.useRef(null);
+  const ref = React.useRef(null);
   const term = cleanWord(word);
   const roleTxt = role ? roleLabel(role, S) : "";
 
+  const place = () => {
+    const el = ref.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const W = 260, H = 130, pad = 8;
+    const above = r.top > H + pad;                       // flip below when there's no room
+    setPos({
+      left: Math.min(Math.max(pad, r.left), innerWidth - W - pad),
+      top: above ? r.top - pad : r.bottom + pad,
+      anchor: above ? "bottom" : "top", width: W
+    });
+  };
   const open = () => {
     if (!term || state) return;
-    setState("loading");
+    place(); setState("loading");
     lookupWord(term, S).then(g => setState(g)).catch(() => setState("err"));
   };
+  const close = () => { clearTimeout(timer.current); setState(null); setPos(null); };
   const enter = () => { clearTimeout(timer.current); timer.current = setTimeout(open, 320); };
-  const leave = () => { clearTimeout(timer.current); if (state !== "pin") setState(null); };
   React.useEffect(() => () => clearTimeout(timer.current), []);
+  React.useEffect(() => {
+    if (!state) return;
+    const h = () => close();
+    window.addEventListener("scroll", h, true); window.addEventListener("resize", h);
+    return () => { window.removeEventListener("scroll", h, true); window.removeEventListener("resize", h); };
+  }, [state]);
 
   const g = state && typeof state === "object" ? state : null;
-  return (
-    <span style={{ position:"relative", display:"inline-block" }}
-      onMouseEnter={enter} onMouseLeave={leave}
-      onClick={(e) => { e.stopPropagation(); clearTimeout(timer.current); state ? setState(null) : open(); }}>
-      <span style={{ cursor:"help", color: color || "inherit", ...(style||{}) }}>{children || word}</span>
-      {state && (
-        <span onClick={e => e.stopPropagation()} style={{ position:"absolute", bottom:"128%", left:0, zIndex:60, minWidth:160,
-          maxWidth:280, background:T.panel2, border:`1px solid ${T.border}`, borderRadius:9, padding:"8px 10px",
-          boxShadow:"0 10px 30px #0009", fontSize:12, color:T.text, fontFamily:"'IBM Plex Sans',sans-serif",
-          whiteSpace:"normal", textAlign:"left", fontWeight:500, fontStyle:"normal" }}>
-          {roleTxt && (
-            <span style={{ display:"block", fontSize:10, color: (ROLES[role]||ROLES.x).color || T.faint,
-              fontFamily:"'JetBrains Mono',monospace", marginBottom:4 }}>{roleTxt}</span>
-          )}
-          {state === "loading" ? <span style={{ color:T.faint }}>…</span>
-            : state === "err" ? <span style={{ color:T.bad }}>lookup failed — check ⚙</span>
-            : (
-            <React.Fragment>
-              <span style={{ display:"block", fontWeight:700 }}>
-                {g.base}{g.pos ? <span style={{ color:T.faint, fontWeight:400, fontSize:11 }}> · {g.pos}</span> : null}
-              </span>
-              <span style={{ display:"block", color:T.mute, marginTop:2 }}>{g.primary}</span>
-              {g.secondary && <span style={{ display:"block", color:T.faint, fontStyle:"italic", marginTop:1 }}>{g.secondary}</span>}
-              {onSave && (
-                <button onClick={() => { onSave({ term: g.base || term, gloss: g.primary + (g.secondary ? " · " + g.secondary : "") }); setState(null); }}
-                  style={{ marginTop:6, fontSize:10.5, padding:"2px 8px", borderRadius:5,
-                    border:`1px solid ${T.accent}`, background:"transparent", color:T.accent, cursor:"pointer" }}>+ vocab</button>
-              )}
-            </React.Fragment>
-          )}
-        </span>
+  const card = state && pos && ReactDOM.createPortal(
+    <div onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={close}
+      onClick={e => e.stopPropagation()}
+      style={{ position:"fixed", left:pos.left, [pos.anchor === "bottom" ? "bottom" : "top"]:
+          pos.anchor === "bottom" ? (innerHeight - pos.top) : pos.top,
+        zIndex:9999, width:pos.width, background:T.panel2, border:`1px solid ${T.border}`, borderRadius:10,
+        padding:"9px 11px", boxShadow:"0 14px 40px #000b", fontSize:12, color:T.text,
+        fontFamily:"'IBM Plex Sans',sans-serif", whiteSpace:"normal", textAlign:"left",
+        fontWeight:500, fontStyle:"normal", lineHeight:1.5 }}>
+      {roleTxt && (
+        <div style={{ fontSize:10, color:(ROLES[role]||ROLES.x).color || T.faint,
+          fontFamily:"'JetBrains Mono',monospace", marginBottom:4 }}>{roleTxt}</div>
       )}
+      {state === "loading" ? <span style={{ color:T.faint }}>…</span>
+        : state === "err" ? <span style={{ color:T.bad }}>lookup failed — check ⚙</span>
+        : (
+        <React.Fragment>
+          <div style={{ fontWeight:700 }}>
+            {g.base}{g.pos ? <span style={{ color:T.faint, fontWeight:400, fontSize:11 }}> · {g.pos}</span> : null}
+          </div>
+          <div style={{ color:T.mute, marginTop:2 }}>{g.primary}</div>
+          {g.secondary && <div style={{ color:T.faint, fontStyle:"italic", marginTop:1 }}>{g.secondary}</div>}
+          <div style={{ display:"flex", gap:6, marginTop:7 }}>
+            <button onClick={() => { speak(g.base || term, S.target, S); }}
+              style={{ fontSize:10.5, padding:"2px 8px", borderRadius:5, border:`1px solid ${T.border}`,
+                background:"transparent", color:T.mute, cursor:"pointer" }}>🔊</button>
+            {onSave && (
+              <button onClick={() => { onSave({ term: g.base || term, gloss: g.primary + (g.secondary ? " · " + g.secondary : "") }); close(); }}
+                style={{ fontSize:10.5, padding:"2px 8px", borderRadius:5,
+                  border:`1px solid ${T.accent}`, background:"transparent", color:T.accent, cursor:"pointer" }}>+ vocab</button>
+            )}
+          </div>
+        </React.Fragment>
+      )}
+    </div>, document.body);
+
+  return (
+    <span ref={ref} style={{ position:"relative", display:"inline-block" }}
+      onMouseEnter={enter} onMouseLeave={() => { clearTimeout(timer.current); timer.current = setTimeout(close, 220); }}
+      onClick={(e) => { e.stopPropagation(); clearTimeout(timer.current); state ? close() : open(); }}>
+      <span style={{ cursor:"help", color: color || "inherit", ...(style||{}) }}>{children || word}</span>
+      {card}
     </span>
   );
 }
@@ -726,4 +809,4 @@ Object.assign(window, { CLUSTERS, NODE_INDEX, GRAM_MAPS, setActiveMap, hasMapFor
   LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL,
   ROLES, roleMeaning, roleLabel, lookupWord, HoverWord, cleanWord,
   CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
-  USAGE, useUsage, llmCall, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });
+  USAGE, useUsage, llmCall, loadUsageLog, USAGE_LOG_KEY, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });
