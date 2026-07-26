@@ -264,7 +264,23 @@ function Lucy({ S, setS, seed, clearSeed, onOpenNode }) {
       ? `Speak only ${tgt.name} and rephrase rather than lecture.`
       : "Be warm and encouraging.";
     const spokenCorrections = (V.correctVia || "screen") === "spoken";
-    return `You are Lucy, a warm ${tgt.name} tutor having a SPOKEN conversation with ${S.lucy.name || "a learner"} at CEFR ${S.level}, aiming for ${S.targetLevel}.
+    // A bare CEFR letter is routinely ignored, so the level is spelled out as
+    // concrete limits on sentence length, tense range and vocabulary.
+    const LEVEL_RULES = {
+      A1: "Use only the present tense and the most common 500 words. Sentences of 3-6 words. One idea per sentence. Speak slowly and repeat key words.",
+      A2: "Present and simple past/perfect only. Everyday vocabulary. Sentences of 5-9 words. Avoid subordinate clauses.",
+      B1: "Common tenses including future and conditional. Simple subordinate clauses. Sentences up to 12 words. Everyday and work vocabulary.",
+      B2: "Full tense range and complex sentences, but keep idioms common and explain rare ones.",
+      C1: "Natural adult speech, including idiom and nuance. Do not simplify.",
+      C2: "Speak entirely naturally, as to a native speaker."
+    };
+    const lv = (S.level || "A2").replace("+", "");
+    const levelLine = LEVEL_RULES[lv] || LEVEL_RULES.A2;
+    return `You are Lucy, a warm ${tgt.name} tutor having a SPOKEN conversation with ${S.lucy.name || "a learner"}.
+
+LEVEL — THIS IS A HARD CONSTRAINT: the learner is CEFR ${S.level}, working towards ${S.targetLevel}. ${levelLine}
+Never exceed this level to sound natural. If you need a word above it, use a simpler one or explain it in one short phrase. Check every sentence against this before you say it.
+
 Speak ${tgt.name}. ${styleLine}
 ${focusLine}${pronLine}
 ${spokenCorrections

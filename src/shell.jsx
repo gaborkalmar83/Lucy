@@ -919,18 +919,13 @@ function Settings({ S, setS, onClose }) {
           ) : <div style={{ fontSize:11.5, color:T.faint }}>{UI.ttsUnsupported}</div>}
         </Field>
 
-        <Field label={"🎨 " + UI.rolesBarLang}>
-          <div style={{ display:"flex", gap:6 }}>
-            {[["primary", UI.primaryLbl + " · " + langName(S.primary)],
-              ["secondary", UI.secondaryLbl + (S.secondary ? " · " + langName(S.secondary) : "")]].map(([id, l]) => (
-              <button key={id} onClick={() => setS({ ...S, rolesLang:id })} disabled={id === "secondary" && !S.secondary}
-                style={{ flex:1, padding:"7px 8px", fontSize:11.5, fontWeight:700, borderRadius:8,
-                  cursor: (id === "secondary" && !S.secondary) ? "not-allowed" : "pointer",
-                  opacity: (id === "secondary" && !S.secondary) ? .45 : 1,
-                  border:`1px solid ${S.rolesLang===id ? T.accent : T.border}`,
-                  background: S.rolesLang===id ? T.accent+"22" : "transparent", color:T.text }}>{l}</button>
-            ))}
-          </div>
+        {/* One setting drives the whole interface, including the roles bar. */}
+        <Field label={"🌐 " + UI.interfaceLang}>
+          <select value={S.uiLang || ""} onChange={e => setS({ ...S, uiLang:e.target.value })} style={inp}>
+            <option value="">{UI.sameAsExplain} · {langName(S.primary)}</option>
+            {EXPLAIN_LANGS.map(l => <option key={l.code} value={l.code}>{l.flag} {l.name}</option>)}
+          </select>
+          <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.interfaceLangNote}</div>
         </Field>
 
         <Field label={"📖 " + UI.reader}>
@@ -1034,7 +1029,7 @@ function BottomBar({ S, dueCount, nav }) {
             {roles.map(([k,v]) => {
               // Which language the bar itself is written in is a setting; the
               // tooltip always shows both so nothing is lost either way.
-              const lang = S.rolesLang === "secondary" && S.secondary ? S.secondary : S.primary;
+              const lang = uiLangOf(S);
               return (
                 <div key={k} style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }} title={roleLabel(k, S)}>
                   <span style={{ width:8, height:8, borderRadius:99, background:v.color, flexShrink:0 }}></span>
@@ -1133,7 +1128,7 @@ function SetupNotice({ onSettings, onDismiss }) {
 
 function App() {
   const [S, setSraw] = React.useState(loadSettings);
-  applyLang(S.primary);
+  applyLang(uiLangOf(S));
   setActiveMap(S.target);   // point CLUSTERS / NODE_INDEX at this language's map
   // Re-apply any cached translation of this map into the explanation language.
   React.useMemo(() => hydrateMapTranslations(S.target, S.primary), [S.target, S.primary]);

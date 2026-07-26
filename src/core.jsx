@@ -156,7 +156,7 @@ const DEFAULT_SETTINGS = {
   speak:{ auto:false, rate:0.9, voice:"" },   // text-to-speech
   dailyGoal:20,                                // SRS cards/day
   reduceMotion:false,
-  rolesLang:"primary",                         // which language the roles bar shows
+  uiLang:"",                                   // interface language ("" = follow the primary explanation language)
   readerProxy:"https://r.jina.ai/",            // used to fetch article text past CORS
   systemExtra:"",                              // appended to every system prompt
   debug:false,                                 // show timing / tokens / tok-per-sec
@@ -617,6 +617,9 @@ const UI_EXTRA = {
     ttsScope:"Use this voice", ttsScopeVoice:"Voice mode only", ttsScopeAll:"Everywhere in the app",
     ttsScopeNote:"Everywhere means the 🔊 buttons on examples, cards and the Reader use your configured voice instead of the browser's.",
     regionDetect:"Detect", regionDetected:"Detected from your resource",
+    interfaceLang:"Interface language", interfaceLangNote:"Menus, buttons and the word-roles bar. Defaults to your primary explanation language.",
+    sameAsExplain:"Same as explanations",
+    voicePause:"Pause", voiceResume:"Resume", voicePaused:"paused",
     bilingualLbl:"Explain everything in both languages",
     bilingualNote:"Corrections, rules and glosses appear in both explanation languages. Off = primary language only.",
     bilingualNeedsSecond:"Choose a second explanation language first.",
@@ -745,8 +748,13 @@ const UI_EXTRA = {
 };
 const UI = { ...UI_STRINGS.en, ...UI_EXTRA.en };
 // English underneath every language: a missing key falls back instead of vanishing.
+// The interface follows its own setting; unset means "same as explanations".
+const uiLangOf = (S) => S.uiLang || S.primary || "en";
 function applyLang(code){
-  Object.assign(UI, UI_STRINGS.en, UI_EXTRA.en, UI_STRINGS[code] || {}, UI_EXTRA[code] || {});
+  // English first, then each per-language set, so a key missing from one
+  // translation falls back on its own instead of blanking the label.
+  Object.assign(UI, UI_STRINGS.en, UI_EXTRA.en,
+    UI_STRINGS[code] || {}, UI_EXTRA[code] || {}, (window.UI_I18N || {})[code] || {});
 }
 
 // lightweight inline markdown → React (bold, italic, `code`)
@@ -942,7 +950,7 @@ function LevelBadge({ level }) {
 }
 
 Object.assign(window, { CLUSTERS, NODE_INDEX, GRAM_MAPS, setActiveMap, hasMapFor,
-  LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL, bilingual, secondLang,
+  LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL, bilingual, secondLang, uiLangOf,
   ROLES, roleMeaning, roleLabel, lookupWord, HoverWord, cleanWord,
   CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
   USAGE, useUsage, llmCall, loadUsageLog, USAGE_LOG_KEY, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments,

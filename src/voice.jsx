@@ -264,6 +264,9 @@ class RealtimeVoice {
 
   send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); }
 
+  // Pause keeps the socket and the conversation, it just stops listening.
+  setPaused(p) { this.paused = !!p; if (p) this.flush(); }
+
   async startAudio() {
     const AC = window.AudioContext || window.webkitAudioContext;
     try { this.micCtx = new AC({ sampleRate: RATE }); } catch(e) { this.micCtx = new AC(); }
@@ -277,7 +280,7 @@ class RealtimeVoice {
     const node = this.micCtx.createScriptProcessor(4096, 1, 1);
     this.node = node;
     node.onaudioprocess = (e) => {
-      if (!this.ws || this.ws.readyState !== 1) return;
+      if (!this.ws || this.ws.readyState !== 1 || this.paused) return;
       let data = e.inputBuffer.getChannelData(0);
       if (this.micCtx.sampleRate !== RATE) data = resample(data, this.micCtx.sampleRate, RATE);
       this.send({ type: "input_audio_buffer.append", audio: floatToPcm16Base64(data) });
@@ -483,6 +486,17 @@ function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose 
   const [lines, setLines] = React.useState([]);
   const clientRef = React.useRef(null);
   const partial = React.useRef("");
+  const [paused, setPaused] = React.useState(false);
+
+  // Follow the conversation automatically, but stop fighting the user the
+  // moment they scroll up to re-read something.
+  const [autoScroll, setAutoScroll] = React.useState(true);
+  const scrollRef = React.useRef(null);
+  const onScroll = () => {
+    const el = scrollRef.current; if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    setAutoScroll(atBottom);
+  };
 
   // Every spoken line is also shown translated into both explanation languages,
   // fetched through the TEXT provider and cached.
@@ -491,14 +505,32 @@ function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose 
       setLines(l => l.map(x => x.id === id ? { ...x, p1: tr.p1, p2: tr.p2 } : x));
     }).catch(() => {});
   };
+  // Recognition refines a line several times before it settles: "ik ga" →
+  // "ik ga naar" → "ik ga naar huis". Showing each pass looks like garbage, so
+  // a refinement REPLACES the previous line instead of adding another, and only
+  // the settled text is ever handed on to the transcript or translated.
+  const lastOf = React.useRef({ user:null, assistant:null });
+  const isRefinement = (prev, next) => {
+    if (!prev) return false;
+    const a = prev.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+    const b = next.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+    return !!a && (b.startsWith(a) || a.startsWith(b));
+  };
   const push = (role, text) => {
     if (!text || !text.trim()) return;
     const clean = text.trim();
-    // Speech transcription regularly emits fragments in the wrong language or
-    // wrong script — audio that is fine to hear but confusing to read. Anything
-    // that is not plausibly one of the three languages in play is dropped.
+    // Transcription regularly emits fragments in a script that has nothing to do
+    // with the conversation — fine to hear, confusing to read.
     if (!plausibleLanguage(clean, S)) return;
+    const prev = lastOf.current[role];
+    if (prev && isRefinement(prev.text, clean) && Date.now() - prev.at < 15000) {
+      prev.text = clean; prev.at = Date.now();
+      setLines(l => l.map(x => x.id === prev.id ? { ...x, text: clean, p1:"", p2:"" } : x));
+      addTranslation(prev.id, clean);
+      return;
+    }
     const id = Math.random().toString(36).slice(2);
+    lastOf.current[role] = { id, text: clean, at: Date.now() };
     setLines(l => [...l.slice(-40), { id, role, text: clean }]);
     (role === "user" ? onUser : onAssistant)(clean);
     addTranslation(id, clean);
@@ -574,6 +606,20 @@ function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose 
     turn();
   };
 
+  React.useEffect(() => {
+    if (!autoScroll) return;
+    const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight;
+  }, [lines, autoScroll]);
+
+  const togglePause = () => {
+    const next = !paused;
+    setPaused(next);
+    const c = clientRef.current;
+    if (realtime && c && c.setPaused) { c.setPaused(next); setState(next ? "paused" : "listening"); }
+    else if (next) { loopRef.current = false; stopSpeaking(); if (c) { try { c.stop(); } catch(e){} } setState("paused"); }
+    else { startBrowser(); }
+  };
+
   const start = () => realtime ? startRealtime() : startBrowser();
   const stop = () => {
     loopRef.current = false;
@@ -585,8 +631,8 @@ function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose 
 
   const running = state !== "idle";
   const label = { idle:UI.voiceIdle, connecting:UI.voiceConnecting, listening:UI.voiceListening,
-    thinking:UI.voiceThinking, speaking:UI.voiceSpeaking }[state] || state;
-  const dot = { listening:T.good, thinking:"#f59e0b", speaking:T.accent, connecting:T.faint, idle:T.faint }[state];
+    thinking:UI.voiceThinking, speaking:UI.voiceSpeaking, paused:UI.voicePaused }[state] || state;
+  const dot = { listening:T.good, thinking:"#f59e0b", speaking:T.accent, connecting:T.faint, idle:T.faint, paused:"#f59e0b" }[state];
 
   return (
     <React.Fragment>
@@ -612,7 +658,8 @@ function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose 
         {err && <div style={{ marginTop:10, padding:"9px 12px", borderRadius:9, background:T.badBg,
           border:`1px solid ${T.badBd}`, color:T.bad, fontSize:12, lineHeight:1.5 }}>{err}</div>}
 
-        <div style={{ flex:1, overflowY:"auto", margin:"12px 0", display:"flex", flexDirection:"column", gap:7, minHeight:80 }}>
+        <div ref={scrollRef} onScroll={onScroll}
+          style={{ flex:1, overflowY:"auto", margin:"12px 0", display:"flex", flexDirection:"column", gap:7, minHeight:80 }}>
           {lines.length === 0 && (
             <div style={{ color:T.faint, fontSize:12.5, lineHeight:1.6, textAlign:"center", margin:"auto", maxWidth:380 }}>
               {realtime ? UI.voiceHintRealtime : UI.voiceHintBrowser}
@@ -644,8 +691,13 @@ function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose 
             <button onClick={start} style={{ flex:1, padding:"13px", fontSize:14.5, fontWeight:700, borderRadius:11,
               border:"none", background:T.accent, color:T.accentText, cursor:"pointer" }}>🎙️ {UI.voiceStart}</button>
           ) : (
-            <button onClick={stop} style={{ flex:1, padding:"13px", fontSize:14.5, fontWeight:700, borderRadius:11,
-              border:`1px solid ${T.bad}`, background:T.badBg, color:T.bad, cursor:"pointer" }}>■ {UI.voiceStop}</button>
+            <React.Fragment>
+              <button onClick={togglePause} style={{ flex:1, padding:"13px", fontSize:14.5, fontWeight:700, borderRadius:11,
+                border:`1px solid ${T.border}`, background:T.panel2, color:T.text, cursor:"pointer" }}>
+                {paused ? "▶ " + UI.voiceResume : "❚❚ " + UI.voicePause}</button>
+              <button onClick={stop} style={{ padding:"13px 18px", fontSize:14.5, fontWeight:700, borderRadius:11,
+                border:`1px solid ${T.bad}`, background:T.badBg, color:T.bad, cursor:"pointer" }}>■</button>
+            </React.Fragment>
           )}
           {/* Always reachable: if the realtime endpoint is down or slow, this
               switches the running session to browser speech immediately. */}
