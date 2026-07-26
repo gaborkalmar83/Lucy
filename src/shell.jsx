@@ -303,7 +303,7 @@ function ModelTools({ S, T, fetched, setFetched, onLoaded }) {
 function VoiceSettings({ S, setS, T, inp, inp2 }) {
   const V = S.voice;
   const setV = (patch) => setS({ ...S, voice: { ...V, ...patch } });
-  const realtime = V.engine === "azure" || V.engine === "openai";
+  const realtime = isRealtimeEngine(V.engine);
   const row = { display:"flex", gap:10, alignItems:"center", marginTop:8, flexWrap:"wrap" };
   const lbl = { fontSize:11, color:T.faint, minWidth:118 };
 
@@ -314,6 +314,8 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
   const canShare = (V.engine === "azure" && S.provider === "azure") || (V.engine === "openai" && S.provider === "openai");
 
   const [vModels, setVModels] = React.useState([]);
+  const [apiVers, setApiVers] = React.useState(VOICE_API_FALLBACK);
+  const [voiceList, setVoiceList] = React.useState([]);   // fetched Speech catalogue
   const [vBusy, setVBusy] = React.useState("");
   const [vMsg, setVMsg] = React.useState(null);
   const [vErr, setVErr] = React.useState(null);
@@ -337,17 +339,32 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
     setVBusy("");
   };
 
-  // Probe candidate api-versions by actually opening the socket — there is no
-  // discovery endpoint, and this is the only answer that is worth anything.
+  // Ask the service what it supports (an invalid api-version makes Azure list
+  // the valid ones), then verify by actually opening a socket. Only if the
+  // service says nothing do we fall back to probing known versions.
   const detectApiVersion = async () => {
     setVBusy("apiver"); setVErr(null); setVMsg(null);
+    let candidates = null, source = UI.apiVerDiscovered;
+    try { candidates = await discoverAzureApiVersions(eff.endpoint, eff.key); }
+    catch(e) { candidates = VOICE_API_FALLBACK.slice(); source = UI.apiVerGuessed; }
+    setApiVers(candidates);
     let found = null;
-    for (const ver of VOICE_API_VERSIONS) {
-      const ok = await probeVoiceEndpoint({ ...S, voice: { ...V, azureApiVersion: ver } });
-      if (ok) { found = ver; break; }
+    for (const ver of candidates) {
+      if (await probeVoiceEndpoint({ ...S, voice: { ...V, azureApiVersion: ver } })) { found = ver; break; }
     }
-    if (found) { setV({ azureApiVersion: found }); setVMsg(UI.apiVerFound + " " + found); }
+    if (found) { setV({ azureApiVersion: found }); setVMsg(UI.apiVerFound + " " + found + " (" + source + ")"); }
     else setVErr(UI.apiVerNone);
+    setVBusy("");
+  };
+
+  // Real voice catalogue for this subscription, from the Speech service.
+  const loadVoices = async () => {
+    setVBusy("voices"); setVErr(null); setVMsg(null);
+    try {
+      const all = await fetchAzureVoices(V.speechRegion, eff.key);
+      setVoiceList(all);
+      setVMsg(all.length + " " + UI.voicesFound);
+    } catch(e) { setVErr(String(e.message || e)); }
     setVBusy("");
   };
 
@@ -360,7 +377,9 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
     setVBusy("");
   };
 
-  const catalogue = V.engine === "openai" ? OPENAI_VOICES : azureVoicesFor(S.target);
+  const fetchedForLang = voiceList.filter(v => (v.locale || "").slice(0,2) === S.target).map(v => v.name);
+  const catalogue = V.engine === "openai" ? OPENAI_VOICES
+    : (fetchedForLang.length ? fetchedForLang : azureVoicesFor(S.target));
   const btn = (primary) => ({ padding:"7px 12px", fontSize:11.5, fontWeight:700, borderRadius:8,
     cursor: vBusy ? "wait" : "pointer", whiteSpace:"nowrap",
     border: primary ? "none" : `1px solid ${T.border}`,
@@ -370,7 +389,7 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
     <React.Fragment>
       <Field label={"🎙️ " + UI.voiceSettings + " — " + UI.voiceEngine}>
         <select value={V.engine} onChange={e => setV({ engine:e.target.value })} style={inp}>
-          {VOICE_ENGINES.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          {voiceEngineOptions().map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select>
         <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.voiceEngineNote}</div>
       </Field>
@@ -428,8 +447,8 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
               <span style={lbl}>api-version</span>
               <select value={V.azureApiVersion} onChange={e => setV({ azureApiVersion:e.target.value })}
                 style={{ ...inp, flex:1 }}>
-                {VOICE_API_VERSIONS.map(v => <option key={v} value={v}>{v}</option>)}
-                {V.azureApiVersion && !VOICE_API_VERSIONS.includes(V.azureApiVersion) &&
+                {apiVers.map(v => <option key={v} value={v}>{v}</option>)}
+                {V.azureApiVersion && !apiVers.includes(V.azureApiVersion) &&
                   <option value={V.azureApiVersion}>{V.azureApiVersion}  (saved)</option>}
               </select>
             </div>
@@ -448,11 +467,29 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
         <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginTop:8, alignItems:"center" }}>
           <button onClick={testVoice} disabled={!!vBusy} style={btn(true)}>
             {vBusy === "voice" ? "…" : "▶ " + UI.voiceHear}</button>
+          {V.engine === "azure" && (
+            <button onClick={loadVoices} disabled={!!vBusy} style={btn(false)}>
+              {vBusy === "voices" ? "…" : (voiceList.length ? "↻ " : "⬇ ") + UI.loadVoices}</button>
+          )}
           {realtime && (
             <input value={V.voiceName} onChange={e => setV({ voiceName:e.target.value })}
               placeholder={UI.voiceCustom} style={{ ...inp, flex:"1 1 160px" }} />
           )}
         </div>
+        {V.engine === "azure" && (
+          <React.Fragment>
+            <div style={row}>
+              <span style={lbl}>{UI.speechRegion}</span>
+              <input value={V.speechRegion || ""} onChange={e => setV({ speechRegion:e.target.value })}
+                placeholder="westeurope" style={{ ...inp, flex:1 }} />
+            </div>
+            <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>
+              {voiceList.length
+                ? voiceList.length + " " + UI.voicesFound + " · " + fetchedForLang.length + " for " + langName(S.target)
+                : UI.speechRegionNote}
+            </div>
+          </React.Fragment>
+        )}
       </Field>
 
       <Field label={UI.voiceStyleLbl}>
@@ -546,12 +583,22 @@ function Settings({ S, setS, onClose }) {
   const [azModels, setAzModels] = React.useState([]);
   const [azLoading, setAzLoading] = React.useState(false);
   const [azErr, setAzErr] = React.useState(null);
+  const [azApiVers, setAzApiVers] = React.useState([]);
+  // Loading deployments also asks the service which api-versions it supports and
+  // moves to the newest, so that field stops being a hardcoded guess as well.
   const loadAzure = async () => {
     setAzLoading(true); setAzErr(null);
     try {
+      const patch = {};
+      try {
+        const vers = await discoverAzureApiVersions(S.azureEndpoint, S.azureKey);
+        setAzApiVers(vers);
+        if (vers.length && !vers.includes(S.azureApiVersion)) patch.azureApiVersion = vers[0];
+      } catch(e) { /* service did not say — keep what is configured */ }
       const list = await fetchAzureDeployments(S.azureEndpoint, S.azureKey);
       setAzModels(list);
-      if (list.length && !list.some(d => d.id === S.azureDeployment)) setS({ ...S, azureDeployment:list[0].id });
+      if (list.length && !list.some(d => d.id === S.azureDeployment)) patch.azureDeployment = list[0].id;
+      if (Object.keys(patch).length) setS({ ...S, ...patch });
       if (!list.length) setAzErr("No deployments found on this resource.");
     } catch(e){ setAzErr(e.message); }
     setAzLoading(false);
@@ -575,6 +622,16 @@ function Settings({ S, setS, onClose }) {
             <LangDropdown value={S.primary} options={EXPLAIN_LANGS} onChange={v => setS({ ...S, primary:v })} T={T} />
             <LangDropdown value={S.secondary} options={EXPLAIN_LANGS} onChange={v => setS({ ...S, secondary:v })} allowNone T={T} />
           </div>
+          {/* Opt-in: without this the second language is only a reading aid. */}
+          <label style={{ display:"flex", alignItems:"flex-start", gap:8, marginTop:10, fontSize:12,
+            color: S.secondary ? T.text : T.faint, cursor: S.secondary ? "pointer" : "not-allowed" }}>
+            <input type="checkbox" checked={!!S.bilingual} disabled={!S.secondary}
+              onChange={e => setS({ ...S, bilingual:e.target.checked })} style={{ marginTop:2 }} />
+            <span>{UI.bilingualLbl}
+              <span style={{ display:"block", color:T.faint, fontSize:10.5, lineHeight:1.5, marginTop:2 }}>
+                {S.secondary ? UI.bilingualNote : UI.bilingualNeedsSecond}</span>
+            </span>
+          </label>
           <div style={{ display:"flex", gap:10, marginTop:10, alignItems:"center" }}>
             <label style={{ fontSize:11, color:T.faint, display:"flex", alignItems:"center", gap:5 }}>{UI.level}
               <select value={S.level} onChange={e => setS({ ...S, level:e.target.value })} style={inp2}>{CEFR_ALL.map(l => <option key={l}>{l}</option>)}</select></label>
@@ -693,8 +750,16 @@ function Settings({ S, setS, onClose }) {
               <ModelTools S={S} T={T} fetched={fetchedModels} setFetched={setFetchedModels} />
             </Field>
             <Field label="API version">
+              {azApiVers.length > 0 ? (
+                <select value={S.azureApiVersion} onChange={e => setS({ ...S, azureApiVersion:e.target.value })} style={inp}>
+                  {azApiVers.map(v => <option key={v} value={v}>{v}</option>)}
+                  {!azApiVers.includes(S.azureApiVersion) &&
+                    <option value={S.azureApiVersion}>{S.azureApiVersion}  (saved)</option>}
+                </select>
+              ) : (
               <input value={S.azureApiVersion} onChange={e => setS({ ...S, azureApiVersion:e.target.value })}
                 placeholder="2024-10-21" style={inp} />
+              )}
             </Field>
             <div style={{ fontSize:10.5, color:T.faint, marginTop:-6, marginBottom:12, lineHeight:1.5 }}>
               Use the <b>deployment name</b> you gave the model in Azure, not the model name — they often differ.

@@ -409,7 +409,7 @@ const sentencesOf = (text) =>
 // global toggle is on, or when this row was asked for them explicitly.
 async function analyseSentence(sentence, S) {
   const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
-  const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
+  const p1 = langName(S.primary), p2 = secondLang(S) ? langName(secondLang(S)) : null;
   const { text } = await llmCall(S, { maxTokens: 700, task: "reader",
     system: `You translate one ${tgt.name} sentence for a learner and label its grammar.
 Reply with ONLY compact JSON, no fences:

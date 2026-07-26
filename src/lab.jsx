@@ -25,7 +25,7 @@ function SentenceLab({ S, input, setInput, onOpenNode }) {
     if (!input.trim() || busy) return;
     setBusy(true); setError(null); setResult(null);
     try {
-      const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
+      const p1 = langName(S.primary), p2 = secondLang(S) ? langName(secondLang(S)) : null;
       const catalog = isNl ? `RULE CATALOG (cite these ids):\n${buildRuleCatalog()}\n\n` : "";
       // With a second explanation language set, every explanatory field is
       // required in BOTH languages — not "where an analogy helps", which the

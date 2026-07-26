@@ -54,6 +54,10 @@ const EXPLAIN_LANGS = [
   { code:"mk", flag:"🇲🇰", name:"Macedonian" }, { code:"sr", flag:"🇷🇸", name:"Serbian" }
 ];
 const langName = (code) => (EXPLAIN_LANGS.find(l=>l.code===code) || TARGET_LANGS.find(l=>l.code===code) || {name:code}).name;
+// Two explanation languages are only used when a second one is chosen AND the
+// learner has opted in; otherwise everything stays in the primary language.
+const bilingual = (S) => !!(S.bilingual && S.secondary && S.secondary !== S.primary);
+const secondLang = (S) => bilingual(S) ? S.secondary : "";
 
 // Word roles: color + NL grammatical term + meanings. NO purple/violet anywhere.
 const ROLES = {
@@ -110,7 +114,7 @@ function roleLabel(role, S) {
   const r = ROLES[role] || ROLES.x;
   if (!r.color) return "";
   const a = roleMeaning(r, S.primary);
-  const b = S.secondary ? roleMeaning(r, S.secondary) : "";
+  const b = secondLang(S) ? roleMeaning(r, secondLang(S)) : "";
   return b && b !== a ? a + " · " + b : a;
 }
 
@@ -140,10 +144,11 @@ const ThemeCtx = React.createContext(THEMES.night);
 // ── Settings + LLM providers ──
 const DEFAULT_SETTINGS = {
   theme:"night", target:"nl", primary:"en", secondary:"", // secondary explanation lang ("" = off)
+  bilingual:false,                             // explain in BOTH languages, not just the primary
   level:"A2", targetLevel:"B2", showRoles:true,
   provider:"builtin", model:"claude-sonnet-4-5", orTier:"free",
   anthropicKey:"", openaiKey:"", openrouterKey:"", localUrl:"http://localhost:11434/v1", localModel:"",
-  azureKey:"", azureEndpoint:"", azureDeployment:"", azureApiVersion:"2024-10-21",
+  azureKey:"", azureEndpoint:"", azureDeployment:"", azureApiVersion:"2024-10-21",  // replaced by discovery
   lucy:{ name:"", style:"direct", tense:"any" },
   // ── added in v3 ──
   speak:{ auto:false, rate:0.9, voice:"" },   // text-to-speech
@@ -163,7 +168,7 @@ const DEFAULT_SETTINGS = {
     openaiKey:"",
     vadThreshold:0.5, vadPrefixMs:300, vadSilenceMs:500,
     echoCancel:true, noiseReduction:true,
-    transcribeModel:"whisper-1",
+    transcribeModel:"whisper-1", speechRegion:"",
     style:"tutor",                             // how chatty Lucy is out loud
     rate:0.95,
     instructionsExtra:"",
@@ -597,7 +602,14 @@ const UI_EXTRA = {
     drillLucy:"Drill with Lucy", customPrompt:"Custom instructions",
     customPromptNote:"Added to every request on top of the app's own instructions — useful for things like \"always compare with German\" or \"keep examples about cooking\". It cannot override the output format the app depends on.",
     debugMode:"Debug readout", debugNote:"Shows response time, tokens and tokens-per-second for the last call in the bottom bar.",
+    bilingualLbl:"Explain everything in both languages",
+    bilingualNote:"Corrections, rules and glosses appear in both explanation languages. Off = primary language only.",
+    bilingualNeedsSecond:"Choose a second explanation language first.",
     loadModels:"Load models", testConn:"Test", modelsFound:"available", testOk:"Working",
+    loadVoices:"Load voices", voicesFound:"voices", speechRegion:"Speech region",
+    speechRegionNote:"Azure publishes its voice catalogue per region, not on the Foundry endpoint. Set the region to load the real list for your subscription.",
+    apiVerDiscovered:"Discovered from the service", apiVerGuessed:"Not advertised by the service — probed",
+    voiceViaBrowser:"speech via your browser",
     oneProvider:"One provider for everything", oneProviderNA:"only when text and voice use the same vendor",
     oneProviderNote:"Use my text provider's endpoint and key for voice too, instead of configuring it twice.",
     currently:"currently", detectApiVer:"Detect", apiVerFound:"Working api-version:",
@@ -743,7 +755,7 @@ function mdInline(text, T) {
 // deduplicated and cached permanently — the same word is never paid for twice.
 const GLOSS_KEY = "lm3:gloss";
 let GLOSS_CACHE = null;
-const glossKeyOf = (word, S) => `${S.target}|${S.primary}|${S.secondary||"-"}|${word.toLowerCase()}`;
+const glossKeyOf = (word, S) => `${S.target}|${S.primary}|${secondLang(S)||"-"}|${word.toLowerCase()}`;
 function loadGloss() {
   if (GLOSS_CACHE) return GLOSS_CACHE;
   try { GLOSS_CACHE = JSON.parse(localStorage.getItem(GLOSS_KEY) || "{}"); } catch(e){ GLOSS_CACHE = {}; }
@@ -768,7 +780,7 @@ async function lookupWord(word, S) {
   if (cache[key]) return cache[key];
   if (GLOSS_PENDING[key]) return GLOSS_PENDING[key];
   const tgt = (TARGET_LANGS.find(l => l.code === S.target) || {}).name || S.target;
-  const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
+  const p1 = langName(S.primary), p2 = secondLang(S) ? langName(secondLang(S)) : null;
   const sys = `You gloss a single ${tgt} word for a learner. Reply with ONLY compact JSON, no fences:
 {"base":"dictionary form","pos":"noun|verb|adjective|adverb|pronoun|preposition|other","p1":"2-4 word meaning in ${p1}"${p2 ? `,"p2":"2-4 word meaning in ${p2}"` : ""}}
 Give the meaning THIS word has, and translate idiomatically into each language — never word-for-word.`;
@@ -789,9 +801,9 @@ Give the meaning THIS word has, and translate idiomatically into each language �
 // voice conversation repeats stock phrases constantly.
 const LINE_CACHE = {};
 async function translateLine(text, S) {
-  const key = `${S.target}|${S.primary}|${S.secondary || "-"}|${text}`;
+  const key = `${S.target}|${S.primary}|${secondLang(S) || "-"}|${text}`;
   if (LINE_CACHE[key]) return LINE_CACHE[key];
-  const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
+  const p1 = langName(S.primary), p2 = secondLang(S) ? langName(secondLang(S)) : null;
   LINE_CACHE[key] = (async () => {
     const { text: out } = await llmCall(S, { maxTokens: 300, task: "voice-translate",
       system: `Translate the line into ${p1}${p2 ? ` and ${p2}` : ""}. Reply with ONLY compact JSON, no fences:
@@ -915,7 +927,7 @@ function LevelBadge({ level }) {
 }
 
 Object.assign(window, { CLUSTERS, NODE_INDEX, GRAM_MAPS, setActiveMap, hasMapFor,
-  LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL,
+  LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL, bilingual, secondLang,
   ROLES, roleMeaning, roleLabel, lookupWord, HoverWord, cleanWord,
   CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
   USAGE, useUsage, llmCall, loadUsageLog, USAGE_LOG_KEY, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments,

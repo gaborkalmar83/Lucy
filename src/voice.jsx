@@ -13,11 +13,23 @@
 // Realtime one), so a single client drives both; only the URL, the credential
 // and the voice field differ.
 
-const VOICE_ENGINES = [
-  { id:"browser", name:"Browser speech (works with any provider)" },
-  { id:"azure",   name:"Azure VoiceLive (realtime)" },
-  { id:"openai",  name:"OpenAI Realtime" }
-];
+// Every text provider can drive voice. Only two of them have a speech-to-speech
+// API; the rest think in text and let the browser do the listening and talking,
+// which still gives a full spoken conversation — just turn by turn.
+const REALTIME_CAPABLE = { azure:true, openai:true };
+function voiceEngineOptions() {
+  const opts = [{ id:"browser", name:"Same as my text provider — " + UI.voiceViaBrowser, realtime:false }];
+  PROVIDERS.forEach(p => {
+    if (p.id === "builtin" && !builtinAvailable()) return;
+    opts.push({
+      id: p.id,
+      name: p.name + (REALTIME_CAPABLE[p.id] ? " — realtime speech" : " — " + UI.voiceViaBrowser),
+      realtime: !!REALTIME_CAPABLE[p.id]
+    });
+  });
+  return opts;
+}
+const isRealtimeEngine = (id) => !!REALTIME_CAPABLE[id];
 
 // Azure "HD" neural voices are named like en-US-Ava:DragonHDLatestNeural; the
 // OpenAI-style ones are bare words. A few sensible starting points per language.
@@ -37,11 +49,46 @@ const OPENAI_VOICES = ["alloy", "echo", "shimmer", "ballad", "coral", "sage", "v
 
 const RATE = 24000;   // both APIs speak PCM16 mono at 24 kHz
 
-// Candidate VoiceLive api-versions, newest first. There is no discovery
-// endpoint, so "detect" simply opens a socket with each until one is accepted.
-const VOICE_API_VERSIONS = [
-  "2025-10-01", "2025-05-01-preview", "2025-04-01-preview", "2024-10-01-preview"
-];
+// Azure does not publish a "list api-versions" endpoint, but it does reject an
+// invalid one with the supported list in the error body. Asking with a
+// deliberately bogus version is therefore real discovery rather than guesswork.
+const BOGUS_API_VERSION = "1900-01-01";
+async function discoverAzureApiVersions(endpoint, key) {
+  const base = azureBase(endpoint);
+  if (!base || !key) throw new Error("Set the endpoint and key first");
+  const res = await fetch(base + "/openai/deployments?api-version=" + BOGUS_API_VERSION,
+    { headers: { "api-key": key } });
+  const body = await res.text();
+  // Versions look like 2024-10-21 or 2025-05-01-preview.
+  const found = [...new Set((body.match(/\d{4}-\d{2}-\d{2}(?:-preview)?/g) || []))]
+    .filter(v => v !== BOGUS_API_VERSION);
+  if (!found.length) throw new Error("The service did not list its api-versions (HTTP " + res.status + ")");
+  return sortApiVersions(found);
+}
+// Newest first, and a stable release outranks a preview of the same date.
+function sortApiVersions(list) {
+  return [...list].sort((a, b) => {
+    const da = a.slice(0, 10), db = b.slice(0, 10);
+    if (da !== db) return db.localeCompare(da);
+    return (a.includes("preview") ? 1 : 0) - (b.includes("preview") ? 1 : 0);
+  });
+}
+// Only used when the service refuses to say — every entry is then verified by
+// actually opening a socket, so nothing unverified is ever presented as fact.
+const VOICE_API_FALLBACK = ["2025-10-01", "2025-05-01-preview", "2025-04-01-preview", "2024-10-01-preview"];
+let VOICE_API_VERSIONS = VOICE_API_FALLBACK.slice();
+
+// The voice catalogue lives on the Speech service, which is region-addressed.
+async function fetchAzureVoices(region, key) {
+  if (!region) throw new Error("Set the Speech region (e.g. westeurope)");
+  if (!key) throw new Error("Set the API key first");
+  const res = await fetch(`https://${region.trim()}.tts.speech.microsoft.com/cognitiveservices/voices/list`,
+    { headers: { "Ocp-Apim-Subscription-Key": key } });
+  if (!res.ok) throw new Error("Speech " + res.status + ": " + (await res.text()).slice(0, 140));
+  const list = await res.json();
+  return list.map(v => ({ name: v.ShortName, locale: v.Locale, gender: v.Gender,
+    display: v.LocalName || v.DisplayName, styles: v.StyleList || [] }));
+}
 
 // One provider for everything: when sameAsText is on, voice borrows the text
 // provider's endpoint and key rather than keeping a second copy of them.
@@ -53,6 +100,11 @@ function voiceCreds(S) {
   }
   return { endpoint: V.azureEndpoint, key: V.engine === "openai" ? V.openaiKey : V.azureKey };
 }
+
+// Which TEXT provider does the thinking when the engine is not realtime?
+// "browser" means "whatever text mode already uses"; anything else names a
+// provider explicitly, so voice and text can differ.
+const voiceTextProvider = (S) => (!S.voice || S.voice.engine === "browser") ? S.provider : S.voice.engine;
 
 // Azure neural voices per language. Bundled rather than fetched: the voice list
 // lives on the Speech service, not on the Foundry endpoint the app talks to.
@@ -357,7 +409,9 @@ function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
   const [engineOverride, setEngineOverride] = React.useState(null);
   const S = engineOverride ? { ...S0, voice: { ...S0.voice, engine: engineOverride } } : S0;
   const V = S.voice || {};
-  const realtime = V.engine === "azure" || V.engine === "openai";
+  const realtime = isRealtimeEngine(V.engine);
+  // A non-realtime engine still uses a real model — with browser ears and voice.
+  const Stext = { ...S, provider: voiceTextProvider(S) };
   const [state, setState] = React.useState("idle");   // idle|connecting|listening|thinking|speaking
   const [err, setErr] = React.useState(null);
   const [lines, setLines] = React.useState([]);
@@ -421,7 +475,7 @@ function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
       push("user", heard);
       setState("thinking");
       try {
-        const { text } = await llmCall(S, { system: instructions, maxTokens: 500, task: "voice",
+        const { text } = await llmCall(Stext, { system: instructions, maxTokens: 500, task: "voice",
           messages: [{ role:"user", content: heard }] });
         if (!loopRef.current) return;
         // Only the target-language half is spoken; the translation is for reading.
@@ -539,5 +593,6 @@ function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
   );
 }
 
-Object.assign(window, { VOICE_ENGINES, AZURE_VOICE_SUGGESTIONS, AZURE_VOICES, azureVoicesFor, OPENAI_VOICES,
+Object.assign(window, { VOICE_ENGINES: [], voiceEngineOptions, isRealtimeEngine, voiceTextProvider,
+  discoverAzureApiVersions, sortApiVersions, fetchAzureVoices, VOICE_API_FALLBACK, AZURE_VOICE_SUGGESTIONS, AZURE_VOICES, azureVoicesFor, OPENAI_VOICES,
   VOICE_API_VERSIONS, voiceCreds, probeVoiceEndpoint, speakSample, RealtimeVoice, VoicePanel });
