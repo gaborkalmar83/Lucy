@@ -7,7 +7,7 @@ const KEYS = {
   vocab:"dgs-vocab", mistakes:"dgs-mistakes", settings:"dgs2",   // v2 keys, kept for continuity
   cards:NS+"cards", days:NS+"days", ruleStats:NS+"ruleStats",
   lucyChat:NS+"lucyChat", labState:NS+"labState", readerText:NS+"readerText",
-  readerUrl:NS+"readerUrl", gloss:NS+"gloss", ui:NS+"ui"
+  readerUrl:NS+"readerUrl", gloss:NS+"gloss", mapTrans:NS+"mapTrans", ui:NS+"ui"
 };
 function jget(k, dflt){ try { const v = localStorage.getItem(k); return v==null ? dflt : JSON.parse(v); } catch(e){ return dflt; } }
 function jset(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch(e){ return false; } }
@@ -211,7 +211,7 @@ function clearAllData(){ BACKUP_KEYS.forEach(k => localStorage.removeItem(k)); }
 
 // ── Speech: output (TTS) and input (STT) ─────────────────────────────────────
 const BCP47 = { nl:"nl-NL", de:"de-DE", fr:"fr-FR", es:"es-ES", it:"it-IT", pt:"pt-PT", sv:"sv-SE",
-  da:"da-DK", no:"nb-NO", pl:"pl-PL", cs:"cs-CZ", hu:"hu-HU", fi:"fi-FI", el:"el-GR", en:"en-GB" };
+  da:"da-DK", no:"nb-NO", pl:"pl-PL", cs:"cs-CZ", hu:"hu-HU", fi:"fi-FI", el:"el-GR", mk:"mk-MK", sr:"sr-RS", ru:"ru-RU", en:"en-GB" };
 const ttsOk = () => typeof speechSynthesis !== "undefined";
 
 function speak(text, langCode, S) {

@@ -298,6 +298,67 @@ function ModelTools({ S, T, fetched, setFetched, onLoaded }) {
   );
 }
 
+// The curated maps are authored in English (and Hungarian). Any other
+// explanation language is translated on demand and cached here forever, so a
+// rule is paid for once and the repository carries no unverified translations.
+function MapTranslation({ S, T, inp }) {
+  const [, force] = React.useReducer(x => x + 1, 0);
+  const [busy, setBusy] = React.useState(false);
+  const [prog, setProg] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  const stop = React.useRef(false);
+
+  const langs = [S.primary, secondLang(S)].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+  const rows = langs.map(l => ({ lang: l, ...mapTransProgress(S.target, l), authored: !needsTranslation(l) }));
+  const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
+
+  const run = async (lang) => {
+    setBusy(true); setErr(null); stop.current = false;
+    try {
+      await translateMap(S.target, lang, S, (p) => setProg({ lang, ...p }), () => stop.current);
+    } catch(e) { setErr(String(e.message || e)); }
+    setBusy(false); setProg(null); force();
+  };
+
+  return (
+    <Field label={"🗺️ " + UI.mapLanguage}>
+      <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+        {rows.map(r => (
+          <div key={r.lang} style={{ display:"flex", alignItems:"center", gap:9, flexWrap:"wrap" }}>
+            <span style={{ fontSize:12, color:T.text, minWidth:96 }}>{langName(r.lang)}</span>
+            {r.authored ? (
+              <span style={{ fontSize:11, color:T.good }}>✓ {UI.mapAuthored}</span>
+            ) : r.done >= r.total && r.total > 0 ? (
+              <React.Fragment>
+                <span style={{ fontSize:11, color:T.good }}>✓ {r.done}/{r.total}</span>
+                <button onClick={() => { clearMapTranslations(S.target, r.lang); force(); }}
+                  style={{ padding:"3px 9px", fontSize:10.5, borderRadius:6, cursor:"pointer",
+                    border:`1px solid ${T.border}`, background:"transparent", color:T.faint }}>{UI.reset}</button>
+              </React.Fragment>
+            ) : (
+              <React.Fragment>
+                <span style={{ fontSize:11, color:T.faint }}>{r.done}/{r.total}</span>
+                <button onClick={() => run(r.lang)} disabled={busy}
+                  style={{ padding:"5px 12px", fontSize:11.5, fontWeight:700, borderRadius:8,
+                    border:"none", background: busy ? T.chip : T.accent, color: busy ? T.mute : T.accentText,
+                    cursor: busy ? "wait" : "pointer" }}>
+                  {prog && prog.lang === r.lang ? prog.done + "/" + prog.total : "⬇ " + UI.mapTranslate}</button>
+              </React.Fragment>
+            )}
+          </div>
+        ))}
+        {busy && <button onClick={() => { stop.current = true; }}
+          style={{ alignSelf:"flex-start", padding:"4px 10px", fontSize:11, borderRadius:7,
+            border:`1px solid ${T.border}`, background:"transparent", color:T.mute, cursor:"pointer" }}>{UI.stopSpeak}</button>}
+      </div>
+      {err && <div style={{ fontSize:11, color:T.bad, marginTop:7, lineHeight:1.5 }}>{err}</div>}
+      <div style={{ fontSize:10.5, color:T.faint, marginTop:7, lineHeight:1.5 }}>
+        {UI.mapTranslateNote.replace("{lang}", tgt.name || S.target)}
+      </div>
+    </Field>
+  );
+}
+
 // Voice is configured on its own: it is a different service from the text
 // model, and only Azure and OpenAI offer a realtime speech API at all.
 function VoiceSettings({ S, setS, T, inp, inp2 }) {
@@ -357,11 +418,24 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
     setVBusy("");
   };
 
+  // The region should come from the resource, not from the learner's memory.
+  const detectRegion = async () => {
+    setVBusy("region"); setVErr(null); setVMsg(null);
+    try {
+      const reg = await detectSpeechRegion(eff.endpoint, eff.key);
+      setV({ speechRegion: reg });
+      setVMsg(UI.regionDetected + ": " + reg);
+    } catch(e) { setVErr(String(e.message || e)); }
+    setVBusy("");
+  };
+
   // Real voice catalogue for this subscription, from the Speech service.
   const loadVoices = async () => {
     setVBusy("voices"); setVErr(null); setVMsg(null);
     try {
-      const all = await fetchAzureVoices(V.speechRegion, eff.key);
+      let region = V.speechRegion;
+      if (!region) { region = await detectSpeechRegion(eff.endpoint, eff.key); setV({ speechRegion: region }); }
+      const all = await fetchAzureVoices(region, eff.key);
       setVoiceList(all);
       setVMsg(all.length + " " + UI.voicesFound);
     } catch(e) { setVErr(String(e.message || e)); }
@@ -481,7 +555,9 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
             <div style={row}>
               <span style={lbl}>{UI.speechRegion}</span>
               <input value={V.speechRegion || ""} onChange={e => setV({ speechRegion:e.target.value })}
-                placeholder="westeurope" style={{ ...inp, flex:1 }} />
+                placeholder="swedencentral" style={{ ...inp, flex:"1 1 120px" }} />
+              <button onClick={detectRegion} disabled={!!vBusy} style={btn(false)}>
+                {vBusy === "region" ? "…" : "🔍 " + UI.regionDetect}</button>
             </div>
             <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>
               {voiceList.length
@@ -490,6 +566,30 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
             </div>
           </React.Fragment>
         )}
+      </Field>
+
+      <Field label={UI.voiceFocus}>
+        <div style={{ display:"flex", gap:6 }}>
+          {[["flow",UI.focusFlow],["grammar",UI.focusGrammar],["intonation",UI.focusIntonation]].map(([id,l]) => (
+            <button key={id} onClick={() => setV({ focus:id })} style={{ flex:1, padding:"7px 4px", fontSize:11.5,
+              fontWeight:700, borderRadius:8, cursor:"pointer",
+              border:`1px solid ${(V.focus||"flow")===id ? T.accent : T.border}`,
+              background: (V.focus||"flow")===id ? T.accent+"22" : "transparent", color:T.text }}>{l}</button>
+          ))}
+        </div>
+        <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.voiceFocusNote}</div>
+      </Field>
+
+      <Field label={UI.voiceCorrectVia}>
+        <div style={{ display:"flex", gap:6 }}>
+          {[["screen",UI.correctScreen],["spoken",UI.correctSpoken]].map(([id,l]) => (
+            <button key={id} onClick={() => setV({ correctVia:id })} style={{ flex:1, padding:"7px 4px", fontSize:11.5,
+              fontWeight:700, borderRadius:8, cursor:"pointer",
+              border:`1px solid ${(V.correctVia||"screen")===id ? T.accent : T.border}`,
+              background: (V.correctVia||"screen")===id ? T.accent+"22" : "transparent", color:T.text }}>{l}</button>
+          ))}
+        </div>
+        <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.voiceCorrectNote}</div>
       </Field>
 
       <Field label={UI.voiceStyleLbl}>
@@ -502,6 +602,20 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
           ))}
         </div>
       </Field>
+
+      {V.engine === "azure" && (
+        <Field label={UI.ttsScope}>
+          <div style={{ display:"flex", gap:6 }}>
+            {[["voice",UI.ttsScopeVoice],["everywhere",UI.ttsScopeAll]].map(([id,l]) => (
+              <button key={id} onClick={() => setV({ ttsScope:id })} style={{ flex:1, padding:"7px 4px", fontSize:11.5,
+                fontWeight:700, borderRadius:8, cursor:"pointer",
+                border:`1px solid ${(V.ttsScope||"voice")===id ? T.accent : T.border}`,
+                background: (V.ttsScope||"voice")===id ? T.accent+"22" : "transparent", color:T.text }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.ttsScopeNote}</div>
+        </Field>
+      )}
 
       {realtime && (
         <Field label={UI.voiceVad}>
@@ -825,6 +939,8 @@ function Settings({ S, setS, onClose }) {
           <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.readerProxyNote}</div>
         </Field>
 
+        <MapTranslation S={S} T={T} inp={inp} />
+
         <div style={{ height:1, background:T.border, margin:"18px 0 16px" }}></div>
         <VoiceSettings S={S} setS={setS} T={T} inp={inp} inp2={inp2} />
 
@@ -1019,6 +1135,9 @@ function App() {
   const [S, setSraw] = React.useState(loadSettings);
   applyLang(S.primary);
   setActiveMap(S.target);   // point CLUSTERS / NODE_INDEX at this language's map
+  // Re-apply any cached translation of this map into the explanation language.
+  React.useMemo(() => hydrateMapTranslations(S.target, S.primary), [S.target, S.primary]);
+  React.useMemo(() => { if (secondLang(S)) hydrateMapTranslations(S.target, secondLang(S)); }, [S.target, S.secondary, S.bilingual]);
   const setS = (next) => { setSraw(next); saveSettings(next); };
   const T = THEMES[S.theme] || THEMES.night;
 

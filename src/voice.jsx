@@ -125,7 +125,8 @@ const AZURE_VOICES = {
   fi: ["fi-FI-SelmaNeural","fi-FI-HarriNeural"],
   el: ["el-GR-AthinaNeural","el-GR-NestorasNeural"],
   mk: ["mk-MK-MarijaNeural","mk-MK-AleksandarNeural"],
-  sr: ["sr-RS-SophieNeural","sr-RS-NicholasNeural"]
+  sr: ["sr-RS-SophieNeural","sr-RS-NicholasNeural"],
+  ru: ["ru-RU-SvetlanaNeural","ru-RU-DariyaNeural","ru-RU-DmitryNeural"]
 };
 const azureVoicesFor = (lang) => AZURE_VOICES[lang] || AZURE_VOICES.en;
 
@@ -218,7 +219,7 @@ class RealtimeVoice {
         prefix_padding_ms: Number(V.vadPrefixMs) || 300,
         silence_duration_ms: Number(V.vadSilenceMs) || 500
       },
-      input_audio_transcription: { model: V.transcribeModel || "whisper-1" }
+      input_audio_transcription: { model: V.transcribeModel || "whisper-1", language: this.S.target }
     };
     if (V.engine !== "openai") {
       // Azure-only server-side audio clean-up.
@@ -341,6 +342,71 @@ class RealtimeVoice {
   }
 }
 
+// ── Transcript sanity ───────────────────────────────────────────────────────
+// Which writing systems can legitimately appear, given the three languages in
+// play (target + both explanation languages)? Anything else is a mis-transcription.
+const SCRIPT_OF = { ru:"cyrl", mk:"cyrl", sr:"cyrl", el:"grek" };
+const SCRIPT_RE = {
+  cyrl: /[Ѐ-ӿ]/, grek: /[Ͱ-Ͽ]/,
+  han: /[぀-ヿ一-鿿]/, arab: /[؀-ۿ]/,
+  hebr: /[֐-׿]/, deva: /[ऀ-ॿ]/, hang: /[가-힯]/
+};
+function plausibleLanguage(text, S) {
+  const langs = [S.target, S.primary, secondLang(S)].filter(Boolean);
+  const allowed = new Set(langs.map(l => SCRIPT_OF[l] || "latn"));
+  // Any script that none of the three languages uses means the transcript drifted.
+  for (const [name, re] of Object.entries(SCRIPT_RE)) {
+    if (re.test(text) && !allowed.has(name)) return false;
+  }
+  // A Latin-only set should not come back as solid Cyrillic or Greek, and vice versa.
+  if (!allowed.has("cyrl") && SCRIPT_RE.cyrl.test(text)) return false;
+  if (!allowed.has("grek") && SCRIPT_RE.grek.test(text)) return false;
+  return true;
+}
+
+// Azure reports the region that served a request. Reading it beats asking the
+// learner to know where their Foundry resource lives.
+async function detectSpeechRegion(endpoint, key) {
+  const base = azureBase(endpoint);
+  if (!base || !key) throw new Error("Set the endpoint and key first");
+  const res = await fetch(base + "/openai/deployments?api-version=2023-03-15-preview",
+    { headers: { "api-key": key } });
+  const hdr = res.headers.get("x-ms-region") || res.headers.get("x-ms-azure-region");
+  if (hdr) return hdr.toLowerCase().replace(/\s+/g, "");   // "Sweden Central" → swedencentral
+  // Header not exposed through CORS: fall back to asking the Speech service
+  // itself which region accepts this key.
+  const guesses = ["swedencentral","westeurope","northeurope","eastus","eastus2","westus","westus2",
+    "uksouth","francecentral","germanywestcentral","switzerlandnorth","norwayeast"];
+  for (const g of guesses) {
+    try {
+      const r = await fetch(`https://${g}.tts.speech.microsoft.com/cognitiveservices/voices/list`,
+        { headers: { "Ocp-Apim-Subscription-Key": key } });
+      if (r.ok) return g;
+    } catch(e) { /* keep trying */ }
+  }
+  throw new Error("Could not determine the region — enter it manually");
+}
+
+// Azure TTS for arbitrary text, so the configured voice can be used app-wide.
+async function azureSpeak(text, S) {
+  const V = S.voice || {};
+  const cred = voiceCreds(S);
+  const region = V.speechRegion;
+  if (!region || !cred.key || !V.voiceName) throw new Error("Voice not configured");
+  const ssml = `<speak version='1.0' xml:lang='${BCP47[S.target] || "en-US"}'>` +
+    `<voice name='${V.voiceName}'>${String(text).replace(/[<&]/g, "")}</voice></speak>`;
+  const res = await fetch(`https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
+    method: "POST",
+    headers: { "Ocp-Apim-Subscription-Key": cred.key, "Content-Type": "application/ssml+xml",
+      "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3" },
+    body: ssml });
+  if (!res.ok) throw new Error("TTS " + res.status);
+  const buf = await res.arrayBuffer();
+  const audio = new Audio(URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" })));
+  audio.play();
+  return audio;
+}
+
 // Does this api-version open at all? Cheap enough to try a handful in sequence.
 function probeVoiceEndpoint(S) {
   return new Promise((resolve) => {
@@ -402,7 +468,7 @@ function speakSample(S) {
 // ── Voice panel ─────────────────────────────────────────────────────────────
 // Owns a session for whichever engine is configured and reports transcript
 // lines back to Lucy so the conversation stays in one place.
-function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
+function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose }) {
   const T = React.useContext(ThemeCtx);
   // A local override lets the panel fall back to browser speech without the
   // user having to go into Settings mid-conversation.
@@ -427,8 +493,12 @@ function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
   };
   const push = (role, text) => {
     if (!text || !text.trim()) return;
-    const id = Math.random().toString(36).slice(2);
     const clean = text.trim();
+    // Speech transcription regularly emits fragments in the wrong language or
+    // wrong script — audio that is fine to hear but confusing to read. Anything
+    // that is not plausibly one of the three languages in play is dropped.
+    if (!plausibleLanguage(clean, S)) return;
+    const id = Math.random().toString(36).slice(2);
     setLines(l => [...l.slice(-40), { id, role, text: clean }]);
     (role === "user" ? onUser : onAssistant)(clean);
     addTranslation(id, clean);
@@ -446,7 +516,11 @@ function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
       onClose: () => setState("idle")
     });
     clientRef.current = c;
-    try { await c.start(instructions); }
+    try {
+      await c.start(instructions);
+      // Say hello first rather than waiting in silence.
+      if (opener) c.send({ type:"response.create", response:{ modalities:["audio","text"], instructions: opener } });
+    }
     catch(e) { setErr(String(e.message || e)); setState("idle"); c.stop(); clientRef.current = null; }
   };
 
@@ -594,5 +668,6 @@ function VoicePanel({ S: S0, instructions, onUser, onAssistant, onClose }) {
 }
 
 Object.assign(window, { VOICE_ENGINES: [], voiceEngineOptions, isRealtimeEngine, voiceTextProvider,
+  plausibleLanguage, detectSpeechRegion, azureSpeak,
   discoverAzureApiVersions, sortApiVersions, fetchAzureVoices, VOICE_API_FALLBACK, AZURE_VOICE_SUGGESTIONS, AZURE_VOICES, azureVoicesFor, OPENAI_VOICES,
   VOICE_API_VERSIONS, voiceCreds, probeVoiceEndpoint, speakSample, RealtimeVoice, VoicePanel });

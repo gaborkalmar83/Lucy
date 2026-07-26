@@ -8,7 +8,13 @@ function SpeakBtn({ text, lang, S, size, title }) {
   const go = (e) => {
     e && e.stopPropagation();
     if (on) { stopSpeaking(); setOn(false); return; }
-    speak(text, lang || S.target, S); setOn(true);
+    // "Everywhere" routes the 🔊 buttons through the configured cloud voice;
+    // anything else (or a failure) uses the browser's own synthesis.
+    const V = S.voice || {};
+    if (V.ttsScope === "everywhere" && V.engine === "azure" && V.voiceName && V.speechRegion) {
+      azureSpeak(text, S).catch(() => speak(text, lang || S.target, S));
+    } else speak(text, lang || S.target, S);
+    setOn(true);
     const iv = setInterval(() => { if (!speechSynthesis.speaking) { setOn(false); clearInterval(iv); } }, 400);
   };
   return (

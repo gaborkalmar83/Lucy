@@ -246,17 +246,44 @@ function Lucy({ S, setS, seed, clearSeed, onOpenNode }) {
   // so the written formatting rules are replaced with spoken-conversation ones.
   const voiceInstructions = () => {
     const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
-    const style = (S.voice && S.voice.style) || "tutor";
+    const V = S.voice || {};
+    const focus = V.focus || "flow";
+    // Pronunciation is only ever drilled when explicitly asked for. Otherwise a
+    // near-miss gets the correct form modelled once and the conversation moves on.
+    const focusLine = focus === "grammar"
+      ? `PRIORITY: grammar. Correct grammar mistakes that matter, one per turn, in a single short sentence, then continue the conversation.`
+      : focus === "intonation"
+      ? `PRIORITY: pronunciation and intonation. Point out mispronunciations, model the correct sound, and let the learner try again.`
+      : `PRIORITY: keeping the conversation flowing. Correct only what genuinely blocks understanding.`;
+    const pronLine = focus === "intonation" ? "" :
+      `\nDO NOT drill pronunciation or intonation. If something is mispronounced but understandable, simply say the word correctly once in your reply and move on. Never ask the learner to repeat a word for pronunciation. Never stop the conversation over accent or a small sound.`;
+    const style = V.style || "tutor";
     const styleLine = style === "strict"
-      ? "Correct every meaningful mistake immediately, briefly, then continue."
+      ? "Be concise and direct."
       : style === "immersive"
-      ? `Speak only ${tgt.name}. Correct only what blocks understanding, and rephrase rather than lecture.`
-      : "Correct the most important mistake per turn, briefly and kindly, then keep the conversation going.";
+      ? `Speak only ${tgt.name} and rephrase rather than lecture.`
+      : "Be warm and encouraging.";
+    const spokenCorrections = (V.correctVia || "screen") === "spoken";
     return `You are Lucy, a warm ${tgt.name} tutor having a SPOKEN conversation with ${S.lucy.name || "a learner"} at CEFR ${S.level}, aiming for ${S.targetLevel}.
 Speak ${tgt.name}. ${styleLine}
-This is speech, not writing: short sentences, no markdown, no bullet points, no emoji, no spelling things out. Never read punctuation aloud.
-Keep each turn to a few sentences and end by inviting the learner to speak.
-If the learner is clearly lost, briefly explain in ${langName(S.primary)} and return to ${tgt.name}.${secondLang(S) ? ` The learner also reads ${langName(secondLang(S))}: after each ${langName(S.primary)} explanation, repeat it in ${langName(secondLang(S))} too.` : ""}${S.voice && S.voice.instructionsExtra ? "\n" + S.voice.instructionsExtra : ""}${S.systemExtra ? "\n" + S.systemExtra : ""}`;
+${focusLine}${pronLine}
+${spokenCorrections
+  ? "Say corrections out loud as part of your reply, briefly, so the learner never has to look at the screen."
+  : "Keep spoken corrections to an absolute minimum — a corrected rephrasing woven into your reply is enough. The learner reads the details on screen."}
+LANGUAGE: speak ONLY ${tgt.name}. Never mix in another language mid-sentence.
+If the learner is completely lost, you may explain briefly in ${langName(S.primary)}, then return to ${tgt.name}.${secondLang(S) ? ` They also read ${langName(secondLang(S))}.` : ""}
+This is speech, not writing: short sentences, no markdown, no bullet points, no emoji, no spelling out. Never read punctuation aloud.
+Keep each turn to a few sentences and end by inviting the learner to speak.${V.instructionsExtra ? "\n" + V.instructionsExtra : ""}${S.systemExtra ? "\n" + S.systemExtra : ""}`;
+  };
+
+  // Opening turn: greet, then offer to continue the existing thread or start fresh.
+  const voiceOpener = () => {
+    const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
+    const recent = msgs.slice(-6).filter(m => m.content).map(m =>
+      (m.role === "user" ? "Learner: " : "You: ") + stripMarkup(m.content).slice(0, 200)).join("\n");
+    return recent
+      ? `Greet the learner in ONE short ${tgt.name} sentence, then in one more sentence say what you were last talking about and ask whether to carry on with it or start something new. Nothing else.\n\nRecent conversation:\n${recent}`
+      : `Greet the learner in ONE short ${tgt.name} sentence and ask in one more sentence what they would like to talk about today. Nothing else.`;
   };
 
   const logMistake = (reply) => {
@@ -381,7 +408,7 @@ If the learner is clearly lost, briefly explain in ${langName(S.primary)} and re
       </div>
 
       {voiceOpen && (
-        <VoicePanel S={S} instructions={voiceInstructions()} onClose={() => setVoiceOpen(false)}
+        <VoicePanel S={S} instructions={voiceInstructions()} opener={voiceOpener()} onClose={() => setVoiceOpen(false)}
           onUser={(t) => setMsgs(m => [...m, { role:"user", content:t }])}
           onAssistant={(t) => { setMsgs(m => [...m, { role:"assistant", content:t }]); logMistake(t); bumpDay({ chats:1, xp:2 }); }} />
       )}

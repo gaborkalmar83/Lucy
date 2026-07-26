@@ -142,7 +142,10 @@ so you can see what a given model actually costs you.
   cached, so a word is only ever fetched once.
 - **Hear everything.** Any sentence, word, example or flashcard reads aloud.
 - **Speak instead of typing** in the Lab and with Lucy.
-- 16 target languages · 12 explanation languages (incl. Macedonian and Serbian) · 4 themes · CEFR levels
+- 17 target languages · 13 explanation languages (incl. Macedonian, Serbian and Russian) · 4 themes · CEFR levels
+- **Any explanation language for the grammar map.** The maps are authored in
+  English; pick any other language and it is translated once by your model and
+  cached in your browser forever — never re-fetched, never leaves your device
 - The word-roles bar can display in either of your explanation languages
 - **Custom instructions** in Settings, added to every request (e.g. "always
   compare with German") without breaking the app's own output format

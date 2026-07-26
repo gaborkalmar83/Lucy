@@ -1,11 +1,11 @@
 // LinguaMap service worker — offline-first shell, network-first for APIs.
-const CACHE = 'linguamap-202607261745';
+const CACHE = 'linguamap-202607261827';
 const PRECACHE = [
   "./",
   "index.html",
-  "assets/app.js?v=202607261745",
-  "assets/app.css?v=202607261745",
-  "assets/sw-register.js?v=202607261745",
+  "assets/app.js?v=202607261827",
+  "assets/app.css?v=202607261827",
+  "assets/sw-register.js?v=202607261827",
   "assets/icon.svg",
   "assets/icon-192.png",
   "assets/icon-512.png",

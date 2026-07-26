@@ -43,7 +43,8 @@ const TARGET_LANGS = [
   { code:"fi", flag:"🇫🇮", name:"Finnish",    native:"Suomi" },
   { code:"el", flag:"🇬🇷", name:"Greek",      native:"Ελληνικά" },
   { code:"mk", flag:"🇲🇰", name:"Macedonian", native:"Македонски" },
-  { code:"sr", flag:"🇷🇸", name:"Serbian",    native:"Српски" }
+  { code:"sr", flag:"🇷🇸", name:"Serbian",    native:"Српски" },
+  { code:"ru", flag:"🇷🇺", name:"Russian",    native:"Русский" }
 ];
 const EXPLAIN_LANGS = [
   { code:"en", flag:"🇬🇧", name:"English" }, { code:"hu", flag:"🇭🇺", name:"Hungarian" },
@@ -51,7 +52,8 @@ const EXPLAIN_LANGS = [
   { code:"es", flag:"🇪🇸", name:"Spanish" }, { code:"it", flag:"🇮🇹", name:"Italian" },
   { code:"pt", flag:"🇵🇹", name:"Portuguese" }, { code:"pl", flag:"🇵🇱", name:"Polish" },
   { code:"sv", flag:"🇸🇪", name:"Swedish" }, { code:"nl", flag:"🇳🇱", name:"Dutch" },
-  { code:"mk", flag:"🇲🇰", name:"Macedonian" }, { code:"sr", flag:"🇷🇸", name:"Serbian" }
+  { code:"mk", flag:"🇲🇰", name:"Macedonian" }, { code:"sr", flag:"🇷🇸", name:"Serbian" },
+  { code:"ru", flag:"🇷🇺", name:"Russian" }
 ];
 const langName = (code) => (EXPLAIN_LANGS.find(l=>l.code===code) || TARGET_LANGS.find(l=>l.code===code) || {name:code}).name;
 // Two explanation languages are only used when a second one is chosen AND the
@@ -62,50 +64,50 @@ const secondLang = (S) => bilingual(S) ? S.secondary : "";
 // Word roles: color + NL grammatical term + meanings. NO purple/violet anywhere.
 const ROLES = {
   s:    { nl:"onderwerp", en:"subject", hu:"alany", de:"Subjekt", fr:"sujet", es:"sujeto", it:"soggetto",
-          pt:"sujeito", pl:"podmiot", sv:"subjekt", mk:"подмет", sr:"субјекат", color:"#60a5fa" },
+          pt:"sujeito", pl:"podmiot", sv:"subjekt", mk:"подмет", sr:"субјекат", ru:"подлежащее", color:"#60a5fa" },
   vfin: { nl:"persoonsvorm", en:"finite verb", hu:"ragozott ige", de:"finites Verb", fr:"verbe conjugué",
           es:"verbo conjugado", it:"verbo coniugato", pt:"verbo conjugado", pl:"orzeczenie", sv:"finit verb",
-          mk:"главен глагол", sr:"лични глаголски облик", color:"#ef4444" },
+          mk:"главен глагол", sr:"лични глаголски облик", ru:"сказуемое", color:"#ef4444" },
   vinf: { nl:"infinitief / deelwoord", en:"non-finite verb", hu:"nem ragozott ige", de:"Infinitiv / Partizip",
           fr:"infinitif / participe", es:"infinitivo / participio", it:"infinito / participio",
           pt:"infinitivo / particípio", pl:"bezokolicznik / imiesłów", sv:"infinitiv / particip",
-          mk:"инфинитив / партицип", sr:"инфинитив / партицип", color:"#f97316" },
+          mk:"инфинитив / партицип", sr:"инфинитив / партицип", ru:"инфинитив / причастие", color:"#f97316" },
   v:    { nl:"werkwoord", en:"verb", hu:"ige", de:"Verb", fr:"verbe", es:"verbo", it:"verbo", pt:"verbo",
-          pl:"czasownik", sv:"verb", mk:"глагол", sr:"глагол", color:"#ef4444" },
+          pl:"czasownik", sv:"verb", mk:"глагол", sr:"глагол", ru:"глагол", color:"#ef4444" },
   o:    { nl:"lijdend voorwerp", en:"direct object", hu:"tárgy", de:"Akkusativobjekt", fr:"COD",
           es:"objeto directo", it:"complemento oggetto", pt:"objeto direto", pl:"dopełnienie bliższe",
-          sv:"direkt objekt", mk:"директен објект", sr:"прави објекат", color:"#22c55e" },
+          sv:"direkt objekt", mk:"директен објект", sr:"прави објекат", ru:"прямое дополнение", color:"#22c55e" },
   io:   { nl:"meewerkend voorwerp", en:"indirect obj.", hu:"részeshatározó", de:"Dativobjekt", fr:"COI",
           es:"objeto indirecto", it:"compl. di termine", pt:"objeto indireto", pl:"dopełnienie dalsze",
-          sv:"indirekt objekt", mk:"индиректен објект", sr:"индиректни објекат", color:"#14b8a6" },
+          sv:"indirekt objekt", mk:"индиректен објект", sr:"индиректни објекат", ru:"косвенное дополнение", color:"#14b8a6" },
   prep: { nl:"voorzetsel", en:"preposition", hu:"elöljáró", de:"Präposition", fr:"préposition",
           es:"preposición", it:"preposizione", pt:"preposição", pl:"przyimek", sv:"preposition",
-          mk:"предлог", sr:"предлог", color:"#eab308" },
+          mk:"предлог", sr:"предлог", ru:"предлог", color:"#eab308" },
   neg:  { nl:"ontkenning", en:"negation", hu:"tagadás", de:"Negation", fr:"négation", es:"negación",
-          it:"negazione", pt:"negação", pl:"przeczenie", sv:"negation", mk:"негација", sr:"негација", color:"#ec4899" },
+          it:"negazione", pt:"negação", pl:"przeczenie", sv:"negation", mk:"негација", sr:"негација", ru:"отрицание", color:"#ec4899" },
   conn: { nl:"voegwoord", en:"conjunction", hu:"kötőszó", de:"Konjunktion", fr:"conjonction",
           es:"conjunción", it:"congiunzione", pt:"conjunção", pl:"spójnik", sv:"konjunktion",
-          mk:"сврзник", sr:"везник", color:"#06b6d4" },
+          mk:"сврзник", sr:"везник", ru:"союз", color:"#06b6d4" },
   adv:  { nl:"bepaling (tijd/plaats)", en:"adverbial", hu:"határozó", de:"adverbiale Bestimmung",
           fr:"complément circonstanciel", es:"complemento circunstancial", it:"complemento avverbiale",
           pt:"adjunto adverbial", pl:"okolicznik", sv:"adverbial", mk:"прилошка определба",
-          sr:"прилошка одредба", color:"#fde047" },
+          sr:"прилошка одредба", ru:"обстоятельство", color:"#fde047" },
   refl: { nl:"wederkerend vnw.", en:"reflexive", hu:"visszaható", de:"Reflexivpronomen", fr:"pronom réfléchi",
           es:"pronombre reflexivo", it:"pronome riflessivo", pt:"pronome reflexo", pl:"zaimek zwrotny",
-          sv:"reflexivt pronomen", mk:"повратна заменка", sr:"повратна заменица", color:"#fda4af" },
+          sv:"reflexivt pronomen", mk:"повратна заменка", sr:"повратна заменица", ru:"возвратное местоимение", color:"#fda4af" },
   part: { nl:"partikel / te", en:"particle", hu:"igekötő / te", de:"Partikel", fr:"particule",
           es:"partícula", it:"particella", pt:"partícula", pl:"partykuła", sv:"partikel",
-          mk:"честичка", sr:"речца", color:"#fb7185" },
+          mk:"честичка", sr:"речца", ru:"частица", color:"#fb7185" },
   art:  { nl:"lidwoord", en:"article", hu:"névelő", de:"Artikel", fr:"article", es:"artículo",
-          it:"articolo", pt:"artigo", pl:"przedimek", sv:"artikel", mk:"член", sr:"члан", color:"#94a3b8" },
+          it:"articolo", pt:"artigo", pl:"przedimek", sv:"artikel", mk:"член", sr:"члан", ru:"артикль", color:"#94a3b8" },
   q:    { nl:"vraagwoord", en:"question word", hu:"kérdőszó", de:"Fragewort", fr:"mot interrogatif",
           es:"palabra interrogativa", it:"parola interrogativa", pt:"palavra interrogativa",
-          pl:"zaimek pytający", sv:"frågeord", mk:"прашален збор", sr:"упитна реч", color:"#f59e0b" },
+          pl:"zaimek pytający", sv:"frågeord", mk:"прашален збор", sr:"упитна реч", ru:"вопросительное слово", color:"#f59e0b" },
   pron: { nl:"voornaamwoord", en:"pronoun", hu:"névmás", de:"Pronomen", fr:"pronom", es:"pronombre",
-          it:"pronome", pt:"pronome", pl:"zaimek", sv:"pronomen", mk:"заменка", sr:"заменица", color:"#7dd3fc" },
+          it:"pronome", pt:"pronome", pl:"zaimek", sv:"pronomen", mk:"заменка", sr:"заменица", ru:"местоимение", color:"#7dd3fc" },
   adj:  { nl:"bijvoeglijk nw.", en:"adjective", hu:"melléknév", de:"Adjektiv", fr:"adjectif",
           es:"adjetivo", it:"aggettivo", pt:"adjetivo", pl:"przymiotnik", sv:"adjektiv",
-          mk:"придавка", sr:"придев", color:"#a3e635" },
+          mk:"придавка", sr:"придев", ru:"прилагательное", color:"#a3e635" },
   x:    { nl:"", en:"", hu:"", color:"" }
 };
 const roleMeaning = (r, code) => r[code] || r.en;
@@ -169,6 +171,9 @@ const DEFAULT_SETTINGS = {
     vadThreshold:0.5, vadPrefixMs:300, vadSilenceMs:500,
     echoCancel:true, noiseReduction:true,
     transcribeModel:"whisper-1", speechRegion:"",
+    focus:"flow",                              // flow | grammar | intonation
+    correctVia:"screen",                       // screen | spoken (hands-free)
+    ttsScope:"voice",                          // voice | everywhere
     style:"tutor",                             // how chatty Lucy is out loud
     rate:0.95,
     instructionsExtra:"",
@@ -602,6 +607,16 @@ const UI_EXTRA = {
     drillLucy:"Drill with Lucy", customPrompt:"Custom instructions",
     customPromptNote:"Added to every request on top of the app's own instructions — useful for things like \"always compare with German\" or \"keep examples about cooking\". It cannot override the output format the app depends on.",
     debugMode:"Debug readout", debugNote:"Shows response time, tokens and tokens-per-second for the last call in the bottom bar.",
+    mapLanguage:"Grammar map language", mapAuthored:"written in this language",
+    mapTranslate:"Translate map", 
+    mapTranslateNote:"The {lang} map is written in English. Any other explanation language is translated once by your model and cached in this browser forever — it is never re-fetched and never leaves your device.",
+    voiceFocus:"Conversation focus", focusFlow:"Natural flow", focusGrammar:"Grammar", focusIntonation:"Pronunciation",
+    voiceFocusNote:"What Lucy prioritises. She never drills pronunciation unless you pick it — otherwise she models the right sound once and keeps talking.",
+    voiceCorrectVia:"Corrections", correctScreen:"On screen", correctSpoken:"Spoken too",
+    voiceCorrectNote:"Spoken corrections keep it hands-free; on-screen keeps the conversation flowing.",
+    ttsScope:"Use this voice", ttsScopeVoice:"Voice mode only", ttsScopeAll:"Everywhere in the app",
+    ttsScopeNote:"Everywhere means the 🔊 buttons on examples, cards and the Reader use your configured voice instead of the browser's.",
+    regionDetect:"Detect", regionDetected:"Detected from your resource",
     bilingualLbl:"Explain everything in both languages",
     bilingualNote:"Corrections, rules and glosses appear in both explanation languages. Off = primary language only.",
     bilingualNeedsSecond:"Choose a second explanation language first.",
