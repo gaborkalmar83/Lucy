@@ -333,107 +333,193 @@ function Progress({ S, nav, onOpenNode }) {
   );
 }
 
-// ── Reader: bring your own text ──────────────────────────────────────────────
-function Reader({ S, nav, setLabInput, setLucySeed }) {
+// ── Reader: bring your own text, or pull an article ──────────────────────────
+const sentencesOf = (text) =>
+  // No lookbehind: Safari before 16.4 throws on it.
+  (String(text).match(/[^.!?…\n]+[.!?…]*/g) || []).map(s => s.trim()).filter(Boolean);
+
+// A sentence row: target language on the left, translation + roles on the right.
+function ReaderRow({ sentence, idx, S, nav, setLabInput, setLucySeed, onSave, mobile }) {
   const T = React.useContext(ThemeCtx);
-  const [text, setText] = usePersistent(KEYS.readerText, "");
-  const [editing, setEditing] = React.useState(!text);
-  const [sel, setSel] = React.useState(null);          // { word, gloss|"loading" }
-  const [vocab, setVocab] = React.useState(() => jget(KEYS.vocab, []));
-  const tgt = TARGET_LANGS.find(l => l.code === S.target);
+  const [trans, setTrans] = React.useState(null);   // null | "loading" | {p1,p2,tokens}
+  const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
 
-  // Sentence split without lookbehind — Safari before 16.4 throws on it, and
-  // this app is meant to run on whatever phone the learner already has.
-  const sentences = React.useMemo(() =>
-    (text.match(/[^.!?…\n]+[.!?…]*/g) || []).map(s => s.trim()).filter(Boolean), [text]);
-
-  const lookup = async (raw) => {
-    const word = raw.replace(/[.,!?;:()"'«»„“”—–]/g, "");
-    if (!word) return;
-    setSel({ word, gloss:"loading" });
-    speak(word, S.target, S);
+  const translate = async () => {
+    if (trans && trans !== "err") return;
+    setTrans("loading");
+    const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
     try {
-      const { text: g } = await llmCall(S, { maxTokens:120,
-        system:`You translate a single ${tgt.name} word into ${langName(S.primary)}. Reply with ONLY: base form, part of speech, and a 2-4 word gloss. No sentences.`,
-        messages:[{ role:"user", content: word }] });
-      setSel({ word, gloss:g.trim() });
-    } catch(e) { setSel({ word, gloss:"⚠ " + e.message }); }
+      const { text } = await llmCall(S, { maxTokens: 700,
+        system: `You translate one ${tgt.name} sentence for a learner and label its grammar.
+Reply with ONLY compact JSON, no fences:
+{"p1":"idiomatic ${p1} translation"${p2 ? `,"p2":"idiomatic ${p2} translation"` : ""},"tokens":[["word","role"],…]}
+roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x — tokens must cover every word of the ORIGINAL sentence in order.
+Translate the MEANING as a native speaker of each language would say it. Never translate word for word; match each language's own word order and idiom.`,
+        messages: [{ role:"user", content: sentence }] });
+      const m = text.match(/\{[\s\S]*\}/);
+      const j = m ? JSON.parse(m[0]) : {};
+      setTrans({ p1: j.p1 || "", p2: j.p2 || "", tokens: Array.isArray(j.tokens) ? j.tokens : null });
+      bumpDay({ lessons: 1 });
+    } catch(e) { setTrans("err"); }
   };
 
-  const addVocab = () => {
-    if (!sel || !sel.gloss || sel.gloss === "loading") return;
-    const n = [{ term:sel.word, gloss:sel.gloss, lang:S.target, ts:Date.now() }, ...vocab.filter(x => x.term !== sel.word)];
+  const words = sentence.split(/(\s+)/);
+  const tokens = trans && trans.tokens;
+
+  const left = (
+    <div style={{ flex:"1 1 0", minWidth:0, padding:"11px 13px" }}>
+      <div style={{ fontSize:15.5, color:T.text, lineHeight:2 }}>
+        {S.showRoles && tokens
+          ? <Tokens tokens={tokens} size={15} S={S} onSave={onSave} />
+          : words.map((w, wi) => /^\s+$/.test(w) || !w ? w
+              : <HoverWord key={wi} word={w} S={S} onSave={onSave}
+                  style={{ borderBottom:`1px dotted ${T.faint}55` }} />)}
+      </div>
+      <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap", alignItems:"center" }}>
+        <span style={{ fontSize:10, color:T.faint, fontFamily:"'JetBrains Mono',monospace" }}>{idx + 1}</span>
+        <SpeakBtn text={sentence} S={S} size={13} />
+        <button onClick={translate} style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>
+          {trans === "loading" ? "…" : "🌐 " + UI.translate}</button>
+        <button onClick={() => { setLabInput(sentence); nav("lab"); }}
+          style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>🔬 {UI.analyze}</button>
+        <button onClick={() => { setLucySeed("Explain this sentence for my level: " + sentence); nav("lucy"); }}
+          style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>✨ {UI.askLucy}</button>
+      </div>
+    </div>
+  );
+
+  const right = (
+    <div style={{ flex:"1 1 0", minWidth:0, padding:"11px 13px",
+      borderLeft: mobile ? "none" : `1px solid ${T.border}`,
+      borderTop: mobile ? `1px dashed ${T.border}` : "none",
+      background: T.panel2 + "80" }}>
+      {!trans && <button onClick={translate} style={{ ...btn(T), fontSize:11 }}>🌐 {UI.translate}</button>}
+      {trans === "loading" && <span style={{ color:T.faint, fontSize:13 }}>…</span>}
+      {trans === "err" && <span style={{ color:T.bad, fontSize:12 }}>{UI.errFail}</span>}
+      {trans && trans !== "loading" && trans !== "err" && (
+        <React.Fragment>
+          <div style={{ fontSize:14, color:T.mute, lineHeight:1.6 }}>{trans.p1}</div>
+          {trans.p2 && <div style={{ fontSize:13, color:T.faint, lineHeight:1.55, marginTop:5,
+            fontStyle:"italic", borderTop:`1px dashed ${T.border}`, paddingTop:5 }}>{trans.p2}</div>}
+        </React.Fragment>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ display:"flex", flexDirection: mobile ? "column" : "row", borderRadius:11,
+      background:T.panel, border:`1px solid ${T.border}`, overflow:"hidden" }}>
+      {left}{right}
+    </div>
+  );
+}
+
+function Reader({ S, nav, setLabInput, setLucySeed }) {
+  const T = React.useContext(ThemeCtx);
+  const mobile = useMedia("(max-width: 820px)");
+  const [text, setText] = usePersistent(KEYS.readerText, "");
+  const [url, setUrl] = usePersistent(KEYS.readerUrl, "");
+  const [editing, setEditing] = React.useState(!text);
+  const [fetching, setFetching] = React.useState(false);
+  const [fetchErr, setFetchErr] = React.useState(null);
+  const [vocab, setVocab] = React.useState(() => jget(KEYS.vocab, []));
+  const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
+
+  const sentences = React.useMemo(() => sentencesOf(text), [text]);
+
+  const addVocab = (v) => {
+    const n = [{ ...v, lang:S.target, ts:Date.now() }, ...vocab.filter(x => x.term !== v.term)];
     setVocab(n); jset(KEYS.vocab, n);
-    syncCards(n, jget(KEYS.mistakes, []));
-    bumpDay({ lessons:1 });
-    setSel(null);
+    syncCards(n, jget(KEYS.mistakes, []));       // straight into the review queue
+  };
+
+  // Browsers block cross-origin reads, so an article has to come through a
+  // text-extraction proxy. It is configurable and can be emptied out entirely.
+  const pull = async () => {
+    const u = url.trim();
+    if (!u) return;
+    setFetching(true); setFetchErr(null);
+    try {
+      const proxy = (S.readerProxy || "").trim();
+      const target = proxy ? proxy.replace(/\/?$/, "/") + u.replace(/^https?:\/\//, m => m) : u;
+      const res = await fetch(target, { headers: { accept: "text/plain,text/html;q=0.9" } });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      let body = await res.text();
+      if (/^\s*</.test(body)) {                   // raw HTML → strip to text
+        const doc = new DOMParser().parseFromString(body, "text/html");
+        doc.querySelectorAll("script,style,nav,header,footer,aside,form,noscript").forEach(n => n.remove());
+        body = (doc.querySelector("article") || doc.body || doc).textContent || "";
+      }
+      body = body.replace(/^Title:.*$/m, "").replace(/^URL Source:.*$/m, "")
+                 .replace(/^Markdown Content:.*$/m, "")
+                 .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")     // markdown links → text
+                 .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+                 .replace(/[#*_>`]/g, "")
+                 .replace(/\n{3,}/g, "\n\n").trim();
+      if (!body) throw new Error("nothing readable came back");
+      setText(body.slice(0, 20000));
+      setEditing(false);
+    } catch(e) {
+      setFetchErr(String(e.message || e) + " — " + UI.readerFetchHint);
+    }
+    setFetching(false);
   };
 
   return (
-    <div style={{ maxWidth:760, margin:"0 auto", padding:"26px 18px 40px" }}>
+    <div style={{ maxWidth: mobile ? 760 : 1100, margin:"0 auto", padding:"26px 18px 40px" }}>
       <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
         <div style={{ fontSize:22, fontWeight:800, color:T.text, letterSpacing:-.5 }}>📖 {UI.reader}</div>
         <span style={{ fontSize:13, color:T.faint }}>{tgt.flag} {tgt.name}</span>
         <span style={{ flex:1 }}></span>
         {text && <SpeakBtn text={text.slice(0, 1200)} S={S} size={16} />}
-        {text && <button onClick={() => setEditing(!editing)} style={{ ...btn(T), fontSize:12 }}>{editing ? "📖 Read" : "✎ Edit"}</button>}
+        {text && <button onClick={() => setEditing(!editing)} style={{ ...btn(T), fontSize:12 }}>
+          {editing ? "📖 " + UI.reader : "✎ " + UI.edit}</button>}
       </div>
 
-      {editing ? (
+      {editing && (
         <React.Fragment>
           <div style={{ fontSize:13, color:T.mute, marginTop:8, lineHeight:1.55 }}>{UI.readerHint}</div>
+
+          <div style={{ display:"flex", gap:7, marginTop:14, flexWrap:"wrap" }}>
+            <input value={url} onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && pull()}
+              placeholder="https://nos.nl/artikel/…"
+              style={{ flex:"1 1 260px", minWidth:0, padding:"10px 13px", fontSize:13.5, borderRadius:10,
+                border:`1px solid ${T.border}`, background:T.panel, color:T.text, outline:"none" }} />
+            <button onClick={pull} disabled={fetching || !url.trim()}
+              style={{ ...btn(T, !fetching && !!url.trim()), padding:"10px 18px" }}>
+              {fetching ? "…" : "⬇ " + UI.fetchArticle}</button>
+          </div>
+          {fetchErr && <div style={{ marginTop:8, padding:"9px 12px", borderRadius:9, background:T.badBg,
+            border:`1px solid ${T.badBd}`, color:T.bad, fontSize:12, lineHeight:1.5 }}>{fetchErr}</div>}
+          <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.readerProxyNote}</div>
+
           <textarea value={text} onChange={e => setText(e.target.value)} placeholder={UI.readerPlaceholder}
-            style={{ width:"100%", minHeight:220, marginTop:14, padding:"13px 15px", fontSize:14.5, lineHeight:1.7,
+            style={{ width:"100%", minHeight:200, marginTop:14, padding:"13px 15px", fontSize:14.5, lineHeight:1.7,
               borderRadius:12, border:`1px solid ${T.border}`, background:T.panel, color:T.text, outline:"none",
               fontFamily:"'IBM Plex Sans',sans-serif", resize:"vertical" }} />
           <div style={{ display:"flex", gap:8, marginTop:10, flexWrap:"wrap" }}>
             <button onClick={() => setEditing(false)} disabled={!text.trim()}
               style={{ ...btn(T, !!text.trim()), padding:"9px 20px" }}>📖 {UI.reader} →</button>
-            {text && <button onClick={() => { setText(""); setSel(null); }} style={btn(T)}>{UI.reset}</button>}
+            {text && <button onClick={() => setText("")} style={btn(T)}>{UI.reset}</button>}
           </div>
         </React.Fragment>
-      ) : (
-        <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:12 }}>
-          {sentences.map((s, si) => (
-            <div key={si} style={{ padding:"11px 13px", borderRadius:11, background:T.panel,
-              border:`1px solid ${T.border}`, lineHeight:1.9 }}>
-              <div style={{ fontSize:15.5, color:T.text }}>
-                {s.split(/(\s+)/).map((w, wi) => /^\s+$/.test(w) || !w ? w : (
-                  <span key={wi} onClick={() => lookup(w)} style={{ cursor:"pointer",
-                    borderBottom:`1px dotted ${T.faint}55`, padding:"0 1px",
-                    background: sel && sel.word === w.replace(/[.,!?;:()"'«»„“”—–]/g,"") ? T.accent+"22" : "transparent" }}>{w}</span>
-                ))}
-              </div>
-              <div style={{ display:"flex", gap:6, marginTop:7, flexWrap:"wrap" }}>
-                <SpeakBtn text={s} S={S} size={13} />
-                <button onClick={() => { setLabInput(s); nav("lab"); }} style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>🔬 {UI.analyze}</button>
-                <button onClick={() => { setLucySeed("Explain this sentence for my level: " + s); nav("lucy"); }}
-                  style={{ ...btn(T), fontSize:10.5, padding:"3px 9px" }}>✨ {UI.askLucy}</button>
-              </div>
-            </div>
-          ))}
-        </div>
       )}
 
-      {sel && (
-        <div style={{ position:"fixed", left:0, right:0, bottom:46, zIndex:80, display:"flex", justifyContent:"center", padding:"0 14px" }}>
-          <div style={{ maxWidth:460, width:"100%", padding:"12px 15px", borderRadius:13, background:T.panel,
-            border:`1px solid ${T.border}`, boxShadow:"0 12px 40px #0009", display:"flex", alignItems:"center", gap:10 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <span style={{ fontSize:15, fontWeight:800, color:T.text, fontFamily:"'JetBrains Mono',monospace" }}>{sel.word}</span>
-                <SpeakBtn text={sel.word} S={S} size={13} />
-              </div>
-              <div style={{ fontSize:12.5, color:T.mute, marginTop:2 }}>
-                {sel.gloss === "loading" ? "…" : sel.gloss}</div>
-            </div>
-            {sel.gloss !== "loading" && !String(sel.gloss).startsWith("⚠") && (
-              <button onClick={addVocab} style={{ ...btn(T, true), fontSize:11.5, padding:"6px 12px", flexShrink:0 }}>+ {UI.vocabTab}</button>
-            )}
-            <button onClick={() => setSel(null)} style={{ background:T.chip, border:"none", color:T.mute,
-              width:28, height:28, borderRadius:8, cursor:"pointer", flexShrink:0 }}>×</button>
+      {!editing && (
+        <React.Fragment>
+          <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:12, flexWrap:"wrap",
+            fontSize:11, color:T.faint }}>
+            <span>{sentences.length} {UI.sentences}</span>
+            <span>· {UI.hoverHint}</span>
           </div>
-        </div>
+          <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:10 }}>
+            {sentences.map((s, si) => (
+              <ReaderRow key={si} sentence={s} idx={si} S={S} nav={nav} mobile={mobile}
+                setLabInput={setLabInput} setLucySeed={setLucySeed} onSave={addVocab} />
+            ))}
+          </div>
+        </React.Fragment>
       )}
     </div>
   );

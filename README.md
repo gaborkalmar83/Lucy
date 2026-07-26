@@ -6,10 +6,13 @@ Most apps tell you a sentence is wrong. This one shows you which rule you broke,
 why that rule exists, gives you drills for it, and then brings it back days later
 when you're about to forget it.
 
-Dutch comes with a hand-written grammar map of **65 rules**. Thirteen other
-European languages work through the AI features. Everything runs in your browser
-— no account, no server, no tracking — and you plug in whichever AI model you
-like, including a free one or one running on your own PC.
+**Dutch, English and Hungarian** each come with a hand-written grammar map —
+65, 41 and 41 rules. Thirteen further European languages work through the AI
+features.
+
+Everything runs in your browser — no account, no server, no tracking — and you
+plug in whichever AI model you like, including a free one or one running on your
+own PC.
 
 ---
 
@@ -17,8 +20,15 @@ like, including a free one or one running on your own PC.
 
 ### 🗺️ Grammar Map — the reference that explains itself
 
-65 Dutch rules in 12 clusters, from *de vs het* to word order in subordinate
-clauses. Every rule gives you:
+Hand-written maps for three languages:
+
+| Language | Rules | Covers |
+|---|---|---|
+| 🇳🇱 Dutch | 65 in 18 clusters | *de/het*, word order, perfect vs imperfect, modals, separable verbs |
+| 🇬🇧 English | 41 in 12 clusters | articles, tense system, perfect aspect, conditionals, phrasal verbs |
+| 🇭🇺 Hungarian | 41 in 11 clusters | vowel harmony, the case system, definite vs indefinite conjugation, verbal prefixes, focus |
+
+Every rule gives you:
 
 - **The rule**, in plain language
 - **Why it exists** — the historical or structural reason, which is usually what
@@ -69,9 +79,18 @@ whole conversation as a transcript.
 
 ### 📖 Reader — learn from things you actually want to read
 
-Paste anything: a news article, song lyrics, a message from a Dutch friend. Tap
-any word for an instant gloss and save it. Tap any sentence to send it to the
-Lab for a grammar breakdown, or to Lucy to have it explained at your level.
+Paste a text **or pull an article straight from a URL** — a news story from
+nos.nl, say. It is split into sentences and laid out in two columns, side by side:
+
+- **Left:** the original, with word roles colour-coded when *Roles* is on
+- **Right:** an idiomatic translation in both of your explanation languages
+- **Hover any word** for its dictionary form, part of speech, grammatical role
+  and meaning in both languages
+- **+ vocab** on any word you don't know — straight into your review queue
+- **🔬 Analyze** sends the sentence to the Sentence Lab; **✨ Ask Lucy** has it
+  explained at your level
+
+Translations are fetched per sentence, so you only pay for what you actually read.
 
 ### 🔁 Review — so you don't forget it a week later
 
@@ -92,10 +111,14 @@ multiple-choice drills for exactly that rule.
 - **Two explanation languages at once.** Set a second language (say Hungarian
   alongside English) and every explanation and correction appears in both —
   written for a speaker of that language, noting where it works the same or
-  differently.
+  differently, never translated word for word.
+- **Hover any word, anywhere** — in the map, in Lucy's replies, in the Reader —
+  for its meaning in both languages plus its grammatical role. Lookups are
+  cached, so a word is only ever fetched once.
 - **Hear everything.** Any sentence, word, example or flashcard reads aloud.
 - **Speak instead of typing** in the Lab and with Lucy.
-- 14 target languages · 10 explanation languages · 4 themes · CEFR levels
+- 16 target languages · 12 explanation languages (incl. Macedonian and Serbian) · 4 themes · CEFR levels
+- The word-roles bar can display in either of your explanation languages
 - Works offline, installs to your phone or desktop like a real app
 
 ---
@@ -251,6 +274,15 @@ tools/build.mjs              build script (site + standalone + service worker)
 ```
 
 The browser loads `docs/`, not `src/` — always rebuild after editing.
+
+## Supporting the project
+
+LinguaMap is free and open source, and stays that way. If it is useful to you
+and you would like to support the work:
+
+**☕ [buymeacoffee.com/gaborkalmar](https://buymeacoffee.com/gaborkalmar)**
+
+Entirely optional — every feature is and will remain available to everyone.
 
 ## Licence
 

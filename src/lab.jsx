@@ -18,7 +18,7 @@ function SentenceLab({ S, input, setInput, onOpenNode }) {
   const [result, setResult] = usePersistent(KEYS.labState + ":result", null);
   const [error, setError] = React.useState(null);
   const dictate = useDictation(S.target, (txt) => setInput(txt));
-  const isNl = S.target === "nl";
+  const isNl = hasMapFor(S.target);   // a curated rule catalog exists for this language
   const tgt = TARGET_LANGS.find(l=>l.code===S.target);
 
   const analyze = async () => {
@@ -110,7 +110,7 @@ BILINGUAL OUTPUT IS MANDATORY: the learner reads ${p1} and ${p2}. Every "note" M
           <div style={{ padding:"16px 18px", borderRadius:12, background:T.panel, border:`1px solid ${T.border}` }}>
             <div style={{ fontSize:10, color:T.faint, fontFamily:"'JetBrains Mono',monospace", letterSpacing:1.5, marginBottom:8 }}>
               {t.verdict} · {result.verdict === "correct" ? "✓" : result.verdict === "errors" ? "✕" : "?"}</div>
-            {result.tokens && <div style={{ marginBottom:10 }}><Tokens tokens={result.tokens} size={16} /></div>}
+            {result.tokens && <div style={{ marginBottom:10 }}><Tokens tokens={result.tokens} size={16} S={S} /></div>}
             {result.verdict !== "correct" && result.corrected && (
               <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:14, color:T.good,
                 fontFamily:"'JetBrains Mono',monospace", padding:"8px 12px",

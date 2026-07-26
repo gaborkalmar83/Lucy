@@ -10,6 +10,8 @@ Tense focus: ${L.tense} (any = natural; present/past/future = keep conversation 
 LANGUAGE CONTRACT (critical): You ALWAYS converse in ${tgt.name}. All explanations, grammar notes, rule names and translations are written in ${langName(S.primary)}. Never reply only in English unless English is one of these languages.${S.primary===S.target ? " Explanation language equals target language, so you may omit the ' | translation' part." : ""}${S.secondary ? `
 BILINGUAL EXPLANATIONS ARE MANDATORY: the learner reads both ${langName(S.primary)} and ${langName(S.secondary)}. EVERY grammar explanation, rule statement and correction must appear in BOTH — ${langName(S.primary)} first, then the ${langName(S.secondary)} version on its own line prefixed with "🌐 ". Write the ${langName(S.secondary)} version for a ${langName(S.secondary)} speaker, pointing out where ${langName(S.secondary)} behaves the same or differently — not a word-for-word translation. This is not optional and applies above all when correcting a mistake. Ordinary conversation turns with no explanation in them do not need the 🌐 line.` : ""}
 
+TRANSLATION QUALITY (critical): every translation must be what a NATIVE speaker of that language would actually say. Translate the meaning, not the words. Use that language's own word order, idioms, cases and set phrases — never mirror ${tgt.name} structure. A translation that is grammatical but sounds foreign is wrong. This matters most for languages structurally unlike ${tgt.name}${S.secondary ? `, especially ${langName(S.secondary)}` : ""}: rebuild the sentence from scratch in that language rather than substituting word by word.
+
 FORMAT RULES:
 - Every ${tgt.name} sentence on its own line, then " | " and its ${langName(S.primary)} translation.
 - If the user writes in ${langName(S.primary)} instead of ${tgt.name}, reply in ${tgt.name} AND append: "${tgt.flag} In het ${tgt.native}: [their sentence in ${tgt.name}]".
@@ -19,7 +21,7 @@ FORMAT RULES:
 ✏️ Correctie:
 ❌ [what they said]
 ✅ [correct version]
-📚 Regel: [rule name]${S.target==="nl" ? " [[map:rule_id]] if it maps to a known Dutch rule id" : ""}
+📚 Regel: [rule name]${hasMapFor(S.target) ? " [[map:rule_id]] if it maps to a known rule id in the app's grammar map" : ""}
 🕐 Tijd/vorm: [1-2 sentences why, in ${langName(S.primary)}]${S.secondary ? `
 🌐 [the rule name AND the same 1-2 sentence explanation in ${langName(S.secondary)} — REQUIRED, never skip this line]` : ""}
 💬 Natiever: [1-2 more natural phrasings]
@@ -27,7 +29,7 @@ FORMAT RULES:
 SPECIAL OUTPUTS:
 - For "annotate", output ONE line: ANNOT: [["word","role"],...] using roles s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x — then a normal explanation.
 - For conjugations, output a markdown table: | pronoun | form | meaning | and mark irregulars with *.${S.showRoles ? "\n- ROLES MODE ON: in EVERY target-language sentence (the part before ' | '), tag each word with its role as word\u27e8role\u27e9 using the codes above, e.g. ik\u27e8s\u27e9 werk\u27e8vfin\u27e9 morgen\u27e8adv\u27e9. Never tag the translation after ' | '." : ""}
-${S.target==="nl" ? "- In Dutch corrections/deep dives, wrap referenced rule ids as [[map:rule_id]] so the app can link them." : ""}`;
+${hasMapFor(S.target) ? "- When a correction or deep dive refers to a rule in the app's grammar map, wrap its id as [[map:rule_id]] so the app can link it." : ""}`;
 }
 
 // [id,label,prompt]
@@ -85,6 +87,8 @@ function ClickWord({ word, S, onSave, color, title }) {
   );
 }
 
+// Uses the shared HoverWord so a word hovered here behaves exactly as it does
+// in the Reader or the grammar map — same bilingual gloss, same cache.
 function ClickableLine({ text, S, onSave }) {
   const T = React.useContext(ThemeCtx);
   return <span style={{ fontWeight:600 }}>{text.split(/(\s+)/).map((w,i) => {
@@ -92,9 +96,9 @@ function ClickableLine({ text, S, onSave }) {
     const m = w.match(/^(.+?)⟨(\w+)⟩([.,!?;:]*)$/);
     if (m) {
       const r = ROLES[m[2]] || ROLES.x;
-      return <span key={i}><ClickWord word={m[1]} S={S} onSave={onSave} color={r.color||T.text} title={r.nl+" · "+roleMeaning(r,S.primary)} />{m[3]}</span>;
+      return <span key={i}><HoverWord word={m[1]} role={m[2]} S={S} onSave={onSave} color={r.color||T.text} />{m[3]}</span>;
     }
-    return <ClickWord key={i} word={w} S={S} onSave={onSave} color={T.text} />;
+    return <HoverWord key={i} word={w} S={S} onSave={onSave} color={T.text} />;
   })}</span>;
 }
 
@@ -133,7 +137,7 @@ function LucyMsg({ m, S, onSave, onOpenNode }) {
     if (!trimmed) { out.push(<div key={i} style={{ height:6 }}></div>); return; }
     if (trimmed.startsWith("ANNOT:")) {
       try { const toks = JSON.parse(trimmed.slice(6).trim());
-        out.push(<div key={i} style={{ margin:"4px 0", padding:"8px 10px", background:T.panel2, borderRadius:8 }}><Tokens tokens={toks} size={15} /></div>); return; }
+        out.push(<div key={i} style={{ margin:"4px 0", padding:"8px 10px", background:T.panel2, borderRadius:8 }}><Tokens tokens={toks} size={15} S={S} onSave={onSave} /></div>); return; }
       catch(e){}
     }
     if (/^[✏️❌✅📚🕐💬🌐]/.test(trimmed)) {
@@ -325,7 +329,7 @@ function Lucy({ S, setS, seed, clearSeed, onOpenNode }) {
               borderRadius:10, border:"none", background:T.accent, color:T.accentText, cursor:"pointer" }}>{t.startSession}</button>
           </div>
         )}
-        {msgs.map((m,i) => <LucyMsg key={i} m={m} S={S} onSave={addVocab} onOpenNode={S.target==="nl"?onOpenNode:null} />)}
+        {msgs.map((m,i) => <LucyMsg key={i} m={m} S={S} onSave={addVocab} onOpenNode={hasMapFor(S.target)?onOpenNode:null} />)}
         {busy && <div style={{ alignSelf:"flex-start", padding:"10px 16px", borderRadius:14, background:T.panel, border:`1px solid ${T.border}`, color:T.faint, fontSize:13 }}>…</div>}
         <div ref={endRef}></div>
       </div>

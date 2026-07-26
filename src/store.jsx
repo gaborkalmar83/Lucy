@@ -6,7 +6,8 @@ const NS = "lm3:";
 const KEYS = {
   vocab:"dgs-vocab", mistakes:"dgs-mistakes", settings:"dgs2",   // v2 keys, kept for continuity
   cards:NS+"cards", days:NS+"days", ruleStats:NS+"ruleStats",
-  lucyChat:NS+"lucyChat", labState:NS+"labState", readerText:NS+"readerText", ui:NS+"ui"
+  lucyChat:NS+"lucyChat", labState:NS+"labState", readerText:NS+"readerText",
+  readerUrl:NS+"readerUrl", gloss:NS+"gloss", ui:NS+"ui"
 };
 function jget(k, dflt){ try { const v = localStorage.getItem(k); return v==null ? dflt : JSON.parse(v); } catch(e){ return dflt; } }
 function jset(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch(e){ return false; } }

@@ -61,7 +61,7 @@ function ExampleBlock({ ex, S }) {
   return (
     <div style={{ padding:"10px 14px", background:T.panel2, borderRadius:10, border:`1px solid ${T.border}` }}>
       <div style={{ display:"flex", alignItems:"flex-start", gap:6 }}>
-        <span style={{ flex:1 }}><Tokens tokens={ex.tokens} size={14.5} /></span>
+        <span style={{ flex:1 }}><Tokens tokens={ex.tokens} size={14.5} S={S} /></span>
         <SpeakBtn text={sentence} S={S} size={13} />
       </div>
       <div style={{ fontSize:12, color:T.mute, marginTop:5 }}>{prim}</div>
@@ -448,6 +448,26 @@ function Settings({ S, setS, onClose }) {
           ) : <div style={{ fontSize:11.5, color:T.faint }}>{UI.ttsUnsupported}</div>}
         </Field>
 
+        <Field label={"🎨 " + UI.rolesBarLang}>
+          <div style={{ display:"flex", gap:6 }}>
+            {[["primary", UI.primaryLbl + " · " + langName(S.primary)],
+              ["secondary", UI.secondaryLbl + (S.secondary ? " · " + langName(S.secondary) : "")]].map(([id, l]) => (
+              <button key={id} onClick={() => setS({ ...S, rolesLang:id })} disabled={id === "secondary" && !S.secondary}
+                style={{ flex:1, padding:"7px 8px", fontSize:11.5, fontWeight:700, borderRadius:8,
+                  cursor: (id === "secondary" && !S.secondary) ? "not-allowed" : "pointer",
+                  opacity: (id === "secondary" && !S.secondary) ? .45 : 1,
+                  border:`1px solid ${S.rolesLang===id ? T.accent : T.border}`,
+                  background: S.rolesLang===id ? T.accent+"22" : "transparent", color:T.text }}>{l}</button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label={"📖 " + UI.reader}>
+          <input value={S.readerProxy} onChange={e => setS({ ...S, readerProxy:e.target.value })}
+            placeholder="https://r.jina.ai/" style={inp} />
+          <div style={{ fontSize:10.5, color:T.faint, marginTop:6, lineHeight:1.5 }}>{UI.readerProxyNote}</div>
+        </Field>
+
         <Field label={"🔁 " + UI.dailyGoalLbl}>
           <div style={{ display:"flex", gap:10, alignItems:"center" }}>
             <input type="range" min="5" max="100" step="5" value={S.dailyGoal}
@@ -484,6 +504,18 @@ function Settings({ S, setS, onClose }) {
           </div>
         </Field>
 
+        <div style={{ marginTop:16, padding:"12px 14px", borderRadius:11, background:T.panel2,
+          border:`1px solid ${T.border}`, display:"flex", gap:11, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:20 }}>☕</span>
+          <div style={{ flex:"1 1 180px", minWidth:0 }}>
+            <div style={{ fontSize:12.5, fontWeight:700, color:T.text }}>{UI.support}</div>
+            <div style={{ fontSize:11, color:T.faint, lineHeight:1.5, marginTop:2 }}>{UI.supportNote}</div>
+          </div>
+          <a href={DONATE_URL} target="_blank" rel="noopener noreferrer"
+            style={{ padding:"7px 14px", fontSize:12, fontWeight:700, borderRadius:9, textDecoration:"none",
+              border:`1px solid ${T.accent}`, color:T.accent, whiteSpace:"nowrap" }}>Buy me a coffee ↗</a>
+        </div>
+
         <div style={{ display:"flex", gap:8, marginTop:18 }}>
           <button onClick={() => { saveSettings(S); onClose(); }} style={{ flex:1, padding:"10px", fontSize:13, fontWeight:700, borderRadius:9,
             border:"none", background:T.accent, color:T.accentText, cursor:"pointer" }}>💾 {UI.saveSession}</button>
@@ -509,12 +541,17 @@ function BottomBar({ S, dueCount, nav }) {
         <React.Fragment>
           <span style={{ fontSize:9, color:T.faint, fontFamily:"'JetBrains Mono',monospace", letterSpacing:1, flexShrink:0 }}>{UI.roles.toUpperCase()}</span>
           <div style={{ display:"flex", flexWrap:"nowrap", gap:"0 10px", flex:1, alignItems:"center" }}>
-            {roles.map(([k,v]) => (
-              <div key={k} style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }} title={v.nl + " · " + roleMeaning(v, S.primary)}>
-                <span style={{ width:8, height:8, borderRadius:99, background:v.color, flexShrink:0 }}></span>
-                <span style={{ fontSize:10, color:T.text, whiteSpace:"nowrap" }}>{v.nl}</span>
-              </div>
-            ))}
+            {roles.map(([k,v]) => {
+              // Which language the bar itself is written in is a setting; the
+              // tooltip always shows both so nothing is lost either way.
+              const lang = S.rolesLang === "secondary" && S.secondary ? S.secondary : S.primary;
+              return (
+                <div key={k} style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }} title={roleLabel(k, S)}>
+                  <span style={{ width:8, height:8, borderRadius:99, background:v.color, flexShrink:0 }}></span>
+                  <span style={{ fontSize:10, color:T.text, whiteSpace:"nowrap" }}>{roleMeaning(v, lang)}</span>
+                </div>
+              );
+            })}
           </div>
         </React.Fragment>
       ) : <span style={{ flex:1 }}></span>}
@@ -602,6 +639,7 @@ function SetupNotice({ onSettings, onDismiss }) {
 function App() {
   const [S, setSraw] = React.useState(loadSettings);
   applyLang(S.primary);
+  setActiveMap(S.target);   // point CLUSTERS / NODE_INDEX at this language's map
   const setS = (next) => { setSraw(next); saveSettings(next); };
   const T = THEMES[S.theme] || THEMES.night;
 

@@ -1,7 +1,25 @@
 // Dutch Grammar Studio v2 — core: themes, languages, roles, i18n, LLM providers, usage tracking
-const CLUSTERS = [...window.GRAM_CLUSTERS_A, ...window.GRAM_CLUSTERS_B, ...window.GRAM_CLUSTERS_C];
-const NODE_INDEX = {};
-CLUSTERS.forEach(c => c.nodes.forEach(n => { NODE_INDEX[n.id] = { node: n, cluster: c }; }));
+// One curated map per language. CLUSTERS / NODE_INDEX point at the active one
+// and are swapped when the target language changes; every consumer reads them
+// at render time, so reassigning the bindings is enough.
+const GRAM_MAPS = {
+  nl: [...window.GRAM_CLUSTERS_A, ...window.GRAM_CLUSTERS_B, ...window.GRAM_CLUSTERS_C],
+  en: window.GRAM_EN || [],
+  hu: window.GRAM_HU || []
+};
+let CLUSTERS = [];
+let NODE_INDEX = {};
+let ACTIVE_MAP = "";
+function setActiveMap(code) {
+  if (code === ACTIVE_MAP) return;
+  ACTIVE_MAP = code;
+  CLUSTERS = GRAM_MAPS[code] || [];
+  NODE_INDEX = {};
+  CLUSTERS.forEach(c => c.nodes.forEach(n => { NODE_INDEX[n.id] = { node: n, cluster: c }; }));
+  window.CLUSTERS = CLUSTERS; window.NODE_INDEX = NODE_INDEX;
+}
+setActiveMap("nl");
+const hasMapFor = (code) => !!(GRAM_MAPS[code] && GRAM_MAPS[code].length);
 
 const LEVELS = ["A1","A2","B1","B2","C1"];
 const LEVEL_COLOR = { A1:"#34d399", A2:"#84cc16", B1:"#f59e0b", B2:"#f43f5e", C1:"#38bdf8" };
@@ -10,6 +28,8 @@ const CEFR_ALL = ["A1","A2","A2+","B1","B1+","B2","C1","C2"];
 // Target languages (flag + name). Dutch has full grammar-map data; others work in Lab + Lucy via LLM.
 const TARGET_LANGS = [
   { code:"nl", flag:"🇳🇱", name:"Dutch",      native:"Nederlands", hasMap:true },
+  { code:"en", flag:"🇬🇧", name:"English",    native:"English",    hasMap:true },
+  { code:"hu", flag:"🇭🇺", name:"Hungarian",  native:"Magyar",     hasMap:true },
   { code:"de", flag:"🇩🇪", name:"German",     native:"Deutsch" },
   { code:"fr", flag:"🇫🇷", name:"French",     native:"Français" },
   { code:"es", flag:"🇪🇸", name:"Spanish",    native:"Español" },
@@ -20,40 +40,79 @@ const TARGET_LANGS = [
   { code:"no", flag:"🇳🇴", name:"Norwegian",  native:"Norsk" },
   { code:"pl", flag:"🇵🇱", name:"Polish",     native:"Polski" },
   { code:"cs", flag:"🇨🇿", name:"Czech",      native:"Čeština" },
-  { code:"hu", flag:"🇭🇺", name:"Hungarian",  native:"Magyar" },
   { code:"fi", flag:"🇫🇮", name:"Finnish",    native:"Suomi" },
-  { code:"el", flag:"🇬🇷", name:"Greek",      native:"Ελληνικά" }
+  { code:"el", flag:"🇬🇷", name:"Greek",      native:"Ελληνικά" },
+  { code:"mk", flag:"🇲🇰", name:"Macedonian", native:"Македонски" },
+  { code:"sr", flag:"🇷🇸", name:"Serbian",    native:"Српски" }
 ];
 const EXPLAIN_LANGS = [
   { code:"en", flag:"🇬🇧", name:"English" }, { code:"hu", flag:"🇭🇺", name:"Hungarian" },
   { code:"de", flag:"🇩🇪", name:"German" }, { code:"fr", flag:"🇫🇷", name:"French" },
   { code:"es", flag:"🇪🇸", name:"Spanish" }, { code:"it", flag:"🇮🇹", name:"Italian" },
   { code:"pt", flag:"🇵🇹", name:"Portuguese" }, { code:"pl", flag:"🇵🇱", name:"Polish" },
-  { code:"sv", flag:"🇸🇪", name:"Swedish" }, { code:"nl", flag:"🇳🇱", name:"Dutch" }
+  { code:"sv", flag:"🇸🇪", name:"Swedish" }, { code:"nl", flag:"🇳🇱", name:"Dutch" },
+  { code:"mk", flag:"🇲🇰", name:"Macedonian" }, { code:"sr", flag:"🇷🇸", name:"Serbian" }
 ];
 const langName = (code) => (EXPLAIN_LANGS.find(l=>l.code===code) || TARGET_LANGS.find(l=>l.code===code) || {name:code}).name;
 
 // Word roles: color + NL grammatical term + meanings. NO purple/violet anywhere.
 const ROLES = {
-  s:    { nl:"onderwerp",              en:"subject",        hu:"alany",              color:"#60a5fa" },
-  vfin: { nl:"persoonsvorm",           en:"finite verb",    hu:"ragozott ige",       color:"#ef4444" },
-  vinf: { nl:"infinitief / deelwoord", en:"non-finite verb",hu:"nem ragozott ige",   color:"#f97316" },
-  v:    { nl:"werkwoord",              en:"verb",           hu:"ige",                color:"#ef4444" },
-  o:    { nl:"lijdend voorwerp",       en:"direct object",  hu:"tárgy",              color:"#22c55e" },
-  io:   { nl:"meewerkend voorwerp",    en:"indirect obj.",  hu:"részeshatározó",     color:"#14b8a6" },
-  prep: { nl:"voorzetsel",             en:"preposition",    hu:"elöljáró",           color:"#eab308" },
-  neg:  { nl:"ontkenning",             en:"negation",       hu:"tagadás",            color:"#ec4899" },
-  conn: { nl:"voegwoord",              en:"conjunction",    hu:"kötőszó",            color:"#06b6d4" },
-  adv:  { nl:"bepaling (tijd/plaats)", en:"adverbial",      hu:"határozó",           color:"#fde047" },
-  refl: { nl:"wederkerend vnw.",       en:"reflexive",      hu:"visszaható",         color:"#fda4af" },
-  part: { nl:"partikel / te",          en:"particle",       hu:"igekötő / te",       color:"#fb7185" },
-  art:  { nl:"lidwoord",               en:"article",        hu:"névelő",             color:"#94a3b8" },
-  q:    { nl:"vraagwoord",             en:"question word",  hu:"kérdőszó",           color:"#f59e0b" },
-  pron: { nl:"voornaamwoord",          en:"pronoun",        hu:"névmás",             color:"#7dd3fc" },
-  adj:  { nl:"bijvoeglijk nw.",        en:"adjective",      hu:"melléknév",          color:"#a3e635" },
+  s:    { nl:"onderwerp", en:"subject", hu:"alany", de:"Subjekt", fr:"sujet", es:"sujeto", it:"soggetto",
+          pt:"sujeito", pl:"podmiot", sv:"subjekt", mk:"подмет", sr:"субјекат", color:"#60a5fa" },
+  vfin: { nl:"persoonsvorm", en:"finite verb", hu:"ragozott ige", de:"finites Verb", fr:"verbe conjugué",
+          es:"verbo conjugado", it:"verbo coniugato", pt:"verbo conjugado", pl:"orzeczenie", sv:"finit verb",
+          mk:"главен глагол", sr:"лични глаголски облик", color:"#ef4444" },
+  vinf: { nl:"infinitief / deelwoord", en:"non-finite verb", hu:"nem ragozott ige", de:"Infinitiv / Partizip",
+          fr:"infinitif / participe", es:"infinitivo / participio", it:"infinito / participio",
+          pt:"infinitivo / particípio", pl:"bezokolicznik / imiesłów", sv:"infinitiv / particip",
+          mk:"инфинитив / партицип", sr:"инфинитив / партицип", color:"#f97316" },
+  v:    { nl:"werkwoord", en:"verb", hu:"ige", de:"Verb", fr:"verbe", es:"verbo", it:"verbo", pt:"verbo",
+          pl:"czasownik", sv:"verb", mk:"глагол", sr:"глагол", color:"#ef4444" },
+  o:    { nl:"lijdend voorwerp", en:"direct object", hu:"tárgy", de:"Akkusativobjekt", fr:"COD",
+          es:"objeto directo", it:"complemento oggetto", pt:"objeto direto", pl:"dopełnienie bliższe",
+          sv:"direkt objekt", mk:"директен објект", sr:"прави објекат", color:"#22c55e" },
+  io:   { nl:"meewerkend voorwerp", en:"indirect obj.", hu:"részeshatározó", de:"Dativobjekt", fr:"COI",
+          es:"objeto indirecto", it:"compl. di termine", pt:"objeto indireto", pl:"dopełnienie dalsze",
+          sv:"indirekt objekt", mk:"индиректен објект", sr:"индиректни објекат", color:"#14b8a6" },
+  prep: { nl:"voorzetsel", en:"preposition", hu:"elöljáró", de:"Präposition", fr:"préposition",
+          es:"preposición", it:"preposizione", pt:"preposição", pl:"przyimek", sv:"preposition",
+          mk:"предлог", sr:"предлог", color:"#eab308" },
+  neg:  { nl:"ontkenning", en:"negation", hu:"tagadás", de:"Negation", fr:"négation", es:"negación",
+          it:"negazione", pt:"negação", pl:"przeczenie", sv:"negation", mk:"негација", sr:"негација", color:"#ec4899" },
+  conn: { nl:"voegwoord", en:"conjunction", hu:"kötőszó", de:"Konjunktion", fr:"conjonction",
+          es:"conjunción", it:"congiunzione", pt:"conjunção", pl:"spójnik", sv:"konjunktion",
+          mk:"сврзник", sr:"везник", color:"#06b6d4" },
+  adv:  { nl:"bepaling (tijd/plaats)", en:"adverbial", hu:"határozó", de:"adverbiale Bestimmung",
+          fr:"complément circonstanciel", es:"complemento circunstancial", it:"complemento avverbiale",
+          pt:"adjunto adverbial", pl:"okolicznik", sv:"adverbial", mk:"прилошка определба",
+          sr:"прилошка одредба", color:"#fde047" },
+  refl: { nl:"wederkerend vnw.", en:"reflexive", hu:"visszaható", de:"Reflexivpronomen", fr:"pronom réfléchi",
+          es:"pronombre reflexivo", it:"pronome riflessivo", pt:"pronome reflexo", pl:"zaimek zwrotny",
+          sv:"reflexivt pronomen", mk:"повратна заменка", sr:"повратна заменица", color:"#fda4af" },
+  part: { nl:"partikel / te", en:"particle", hu:"igekötő / te", de:"Partikel", fr:"particule",
+          es:"partícula", it:"particella", pt:"partícula", pl:"partykuła", sv:"partikel",
+          mk:"честичка", sr:"речца", color:"#fb7185" },
+  art:  { nl:"lidwoord", en:"article", hu:"névelő", de:"Artikel", fr:"article", es:"artículo",
+          it:"articolo", pt:"artigo", pl:"przedimek", sv:"artikel", mk:"член", sr:"члан", color:"#94a3b8" },
+  q:    { nl:"vraagwoord", en:"question word", hu:"kérdőszó", de:"Fragewort", fr:"mot interrogatif",
+          es:"palabra interrogativa", it:"parola interrogativa", pt:"palavra interrogativa",
+          pl:"zaimek pytający", sv:"frågeord", mk:"прашален збор", sr:"упитна реч", color:"#f59e0b" },
+  pron: { nl:"voornaamwoord", en:"pronoun", hu:"névmás", de:"Pronomen", fr:"pronom", es:"pronombre",
+          it:"pronome", pt:"pronome", pl:"zaimek", sv:"pronomen", mk:"заменка", sr:"заменица", color:"#7dd3fc" },
+  adj:  { nl:"bijvoeglijk nw.", en:"adjective", hu:"melléknév", de:"Adjektiv", fr:"adjectif",
+          es:"adjetivo", it:"aggettivo", pt:"adjetivo", pl:"przymiotnik", sv:"adjektiv",
+          mk:"придавка", sr:"придев", color:"#a3e635" },
   x:    { nl:"", en:"", hu:"", color:"" }
 };
 const roleMeaning = (r, code) => r[code] || r.en;
+// "subject · alany" — the role in both configured explanation languages.
+function roleLabel(role, S) {
+  const r = ROLES[role] || ROLES.x;
+  if (!r.color) return "";
+  const a = roleMeaning(r, S.primary);
+  const b = S.secondary ? roleMeaning(r, S.secondary) : "";
+  return b && b !== a ? a + " · " + b : a;
+}
 
 const CLUSTER_HUES = { amber:"#f59e0b", indigo:"#38bdf8", teal:"#2dd4bf", rose:"#fb7185" };
 
@@ -89,8 +148,11 @@ const DEFAULT_SETTINGS = {
   // ── added in v3 ──
   speak:{ auto:false, rate:0.9, voice:"" },   // text-to-speech
   dailyGoal:20,                                // SRS cards/day
-  reduceMotion:false
+  reduceMotion:false,
+  rolesLang:"primary",                         // which language the roles bar shows
+  readerProxy:"https://r.jina.ai/"             // used to fetch article text past CORS
 };
+const DONATE_URL = "https://buymeacoffee.com/gaborkalmar";
 function loadSettings(){
   try {
     const saved = JSON.parse(localStorage.getItem("dgs2")||"{}");
@@ -423,6 +485,10 @@ const UI_STRINGS = {
 // key instead of rendering "undefined".
 const UI_EXTRA = {
   en: { review:"Review", progress:"Progress", reader:"Reader", practice:"Practice",
+    translate:"Translate", fetchArticle:"Fetch article", sentences:"sentences", edit:"Edit",
+    hoverHint:"hover a word for its meaning and role", rolesBarLang:"Roles bar language", primaryLbl:"Primary", secondaryLbl:"Secondary",
+    readerFetchHint:"the site may block outside access; try pasting the text instead", readerProxyNote:"Fetching sends the URL to the text-extraction service in Settings (default r.jina.ai). Clear that field to fetch directly — most news sites will refuse. Pasting text never contacts anyone.",
+    support:"Support this project", supportNote:"LinguaMap is free and open source. If it helps you, you can buy me a coffee.",
     due:"due", newCards:"new", noDue:"Nothing due — you're all caught up.", startReview:"Start review",
     again:"Again", hard:"Hard", good:"Good", easy:"Easy", showAnswer:"Show answer", endSession:"Finish",
     reviewDone:"Session complete", cardsLeft:"left", streak:"Streak", days:"days", xp:"XP",
@@ -445,6 +511,10 @@ const UI_EXTRA = {
     backupNote:"Your vocabulary, review schedule and progress live in this browser only. Export before switching device or clearing site data. The normal export leaves your API keys out — use ⬇ + 🔑 only for a backup you keep private.",
     exportKeysWarn:"This file will contain your API keys in plain text. Anyone who opens it can use your account. Only do this for a backup you keep private — never email it, upload it, or put it in a shared folder.\n\nContinue?" },
   hu: { review:"Ismétlés", progress:"Haladás", reader:"Olvasó", practice:"Gyakorlás",
+    translate:"Fordítás", fetchArticle:"Cikk letöltése", sentences:"mondat", edit:"Szerkesztés",
+    hoverHint:"vidd a szó fölé a jelentésért és szerepért", rolesBarLang:"Szerepek sáv nyelve", primaryLbl:"Elsődleges", secondaryLbl:"Másodlagos",
+    readerFetchHint:"az oldal blokkolhatja a külső hozzáférést; próbáld beilleszteni a szöveget", readerProxyNote:"A letöltés elküldi az URL-t a Beállításokban megadott szolgáltatásnak (alapértelmezés: r.jina.ai). Írd üresre a közvetlen letöltéshez — a legtöbb híroldal ezt megtagadja. A beillesztés soha nem küld adatot.",
+    support:"Támogasd a projektet", supportNote:"A LinguaMap ingyenes és nyílt forrású. Ha hasznos, meghívhatsz egy kávéra.",
     due:"esedékes", newCards:"új", noDue:"Nincs esedékes kártya — mindennel megvagy.", startReview:"Ismétlés indítása",
     again:"Újra", hard:"Nehéz", good:"Jó", easy:"Könnyű", showAnswer:"Megoldás", endSession:"Befejezés",
     reviewDone:"Kész a kör", cardsLeft:"maradt", streak:"Sorozat", days:"nap", xp:"XP",
@@ -467,6 +537,10 @@ const UI_EXTRA = {
     backupNote:"A szavaid, ismétlési ütemterved és haladásod csak ebben a böngészőben él. Exportálj, mielőtt eszközt váltasz vagy törlöd az adatokat. A normál export nem tartalmazza az API kulcsokat — a ⬇ + 🔑 csak privát mentéshez való.",
     exportKeysWarn:"Ez a fájl nyílt szövegben tartalmazza az API kulcsaidat. Aki megnyitja, használhatja a fiókodat. Csak privát mentéshez — soha ne küldd e-mailben, ne töltsd fel, és ne tedd megosztott mappába.\n\nFolytatod?" },
   nl: { review:"Herhaling", progress:"Voortgang", reader:"Lezer", practice:"Oefenen",
+    translate:"Vertalen", fetchArticle:"Artikel ophalen", sentences:"zinnen", edit:"Bewerken",
+    hoverHint:"beweeg over een woord voor betekenis en rol", rolesBarLang:"Taal van de rollenbalk", primaryLbl:"Primair", secondaryLbl:"Secundair",
+    readerFetchHint:"de site blokkeert mogelijk externe toegang; plak anders de tekst", readerProxyNote:"Ophalen stuurt de URL naar de tekstdienst uit Instellingen (standaard r.jina.ai). Maak dat veld leeg om direct op te halen — de meeste nieuwssites weigeren dat. Plakken verstuurt nooit iets.",
+    support:"Steun dit project", supportNote:"LinguaMap is gratis en open source. Als het je helpt, kun je me een koffie aanbieden.",
     due:"te doen", newCards:"nieuw", noDue:"Niets te herhalen — je bent bij.", startReview:"Start herhaling",
     again:"Opnieuw", hard:"Moeilijk", good:"Goed", easy:"Makkelijk", showAnswer:"Toon antwoord", endSession:"Klaar",
     reviewDone:"Sessie klaar", cardsLeft:"over", streak:"Reeks", days:"dagen", xp:"XP",
@@ -525,13 +599,120 @@ function mdInline(text, T) {
   return parts;
 }
 
-function Tokens({ tokens, size }) {
+// ── Word glosses: one shared, cached lookup for the whole app ───────────────
+// Hovering any target-language word anywhere should explain it, so lookups are
+// deduplicated and cached permanently — the same word is never paid for twice.
+const GLOSS_KEY = "lm3:gloss";
+let GLOSS_CACHE = null;
+const glossKeyOf = (word, S) => `${S.target}|${S.primary}|${S.secondary||"-"}|${word.toLowerCase()}`;
+function loadGloss() {
+  if (GLOSS_CACHE) return GLOSS_CACHE;
+  try { GLOSS_CACHE = JSON.parse(localStorage.getItem(GLOSS_KEY) || "{}"); } catch(e){ GLOSS_CACHE = {}; }
+  return GLOSS_CACHE;
+}
+function saveGloss(key, val) {
+  const c = loadGloss();
+  c[key] = val;
+  const keys = Object.keys(c);
+  if (keys.length > 4000) keys.slice(0, 500).forEach(k => delete c[k]);   // keep it bounded
+  try { localStorage.setItem(GLOSS_KEY, JSON.stringify(c)); } catch(e){}
+}
+const cleanWord = (w) => String(w).replace(/[.,!?;:()"'«»„“”—–…\[\]]/g, "").trim();
+
+const GLOSS_PENDING = {};
+// Returns { term, primary, secondary?, pos? } — both explanation languages at once.
+async function lookupWord(word, S) {
+  const term = cleanWord(word);
+  if (!term) throw new Error("empty");
+  const key = glossKeyOf(term, S);
+  const cache = loadGloss();
+  if (cache[key]) return cache[key];
+  if (GLOSS_PENDING[key]) return GLOSS_PENDING[key];
+  const tgt = (TARGET_LANGS.find(l => l.code === S.target) || {}).name || S.target;
+  const p1 = langName(S.primary), p2 = S.secondary ? langName(S.secondary) : null;
+  const sys = `You gloss a single ${tgt} word for a learner. Reply with ONLY compact JSON, no fences:
+{"base":"dictionary form","pos":"noun|verb|adjective|adverb|pronoun|preposition|other","p1":"2-4 word meaning in ${p1}"${p2 ? `,"p2":"2-4 word meaning in ${p2}"` : ""}}
+Give the meaning THIS word has, and translate idiomatically into each language — never word-for-word.`;
+  GLOSS_PENDING[key] = (async () => {
+    try {
+      const { text } = await llmCall(S, { system: sys, maxTokens: 150, messages: [{ role:"user", content: term }] });
+      const m = text.match(/\{[\s\S]*\}/);
+      const j = m ? JSON.parse(m[0]) : {};
+      const out = { term, base: j.base || term, pos: j.pos || "", primary: j.p1 || text.trim(), secondary: j.p2 || "" };
+      saveGloss(key, out);
+      return out;
+    } finally { delete GLOSS_PENDING[key]; }
+  })();
+  return GLOSS_PENDING[key];
+}
+
+// Wraps any target-language word: hover (or tap) shows role + both meanings.
+function HoverWord({ word, role, S, onSave, color, style, children }) {
+  const T = React.useContext(ThemeCtx);
+  const [state, setState] = React.useState(null);   // null | "loading" | gloss | "err"
+  const timer = React.useRef(null);
+  const term = cleanWord(word);
+  const roleTxt = role ? roleLabel(role, S) : "";
+
+  const open = () => {
+    if (!term || state) return;
+    setState("loading");
+    lookupWord(term, S).then(g => setState(g)).catch(() => setState("err"));
+  };
+  const enter = () => { clearTimeout(timer.current); timer.current = setTimeout(open, 320); };
+  const leave = () => { clearTimeout(timer.current); if (state !== "pin") setState(null); };
+  React.useEffect(() => () => clearTimeout(timer.current), []);
+
+  const g = state && typeof state === "object" ? state : null;
+  return (
+    <span style={{ position:"relative", display:"inline-block" }}
+      onMouseEnter={enter} onMouseLeave={leave}
+      onClick={(e) => { e.stopPropagation(); clearTimeout(timer.current); state ? setState(null) : open(); }}>
+      <span style={{ cursor:"help", color: color || "inherit", ...(style||{}) }}>{children || word}</span>
+      {state && (
+        <span onClick={e => e.stopPropagation()} style={{ position:"absolute", bottom:"128%", left:0, zIndex:60, minWidth:160,
+          maxWidth:280, background:T.panel2, border:`1px solid ${T.border}`, borderRadius:9, padding:"8px 10px",
+          boxShadow:"0 10px 30px #0009", fontSize:12, color:T.text, fontFamily:"'IBM Plex Sans',sans-serif",
+          whiteSpace:"normal", textAlign:"left", fontWeight:500, fontStyle:"normal" }}>
+          {roleTxt && (
+            <span style={{ display:"block", fontSize:10, color: (ROLES[role]||ROLES.x).color || T.faint,
+              fontFamily:"'JetBrains Mono',monospace", marginBottom:4 }}>{roleTxt}</span>
+          )}
+          {state === "loading" ? <span style={{ color:T.faint }}>…</span>
+            : state === "err" ? <span style={{ color:T.bad }}>lookup failed — check ⚙</span>
+            : (
+            <React.Fragment>
+              <span style={{ display:"block", fontWeight:700 }}>
+                {g.base}{g.pos ? <span style={{ color:T.faint, fontWeight:400, fontSize:11 }}> · {g.pos}</span> : null}
+              </span>
+              <span style={{ display:"block", color:T.mute, marginTop:2 }}>{g.primary}</span>
+              {g.secondary && <span style={{ display:"block", color:T.faint, fontStyle:"italic", marginTop:1 }}>{g.secondary}</span>}
+              {onSave && (
+                <button onClick={() => { onSave({ term: g.base || term, gloss: g.primary + (g.secondary ? " · " + g.secondary : "") }); setState(null); }}
+                  style={{ marginTop:6, fontSize:10.5, padding:"2px 8px", borderRadius:5,
+                    border:`1px solid ${T.accent}`, background:"transparent", color:T.accent, cursor:"pointer" }}>+ vocab</button>
+              )}
+            </React.Fragment>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function Tokens({ tokens, size, S, onSave }) {
   const T = React.useContext(ThemeCtx);
   return (
     <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:size||13, lineHeight:1.7 }}>
       {tokens.map(([text, role], i) => {
         const r = ROLES[role] || ROLES.x;
-        return <span key={i} style={{ color: r.color || T.text, fontWeight: role==="vfin"?700:500, marginRight:5 }} title={r.en}>{text}</span>;
+        const st = { color: r.color || T.text, fontWeight: role==="vfin"?700:500, marginRight:5 };
+        // Without settings we cannot look anything up, so fall back to plain text.
+        if (!S) return <span key={i} style={st} title={r.en}>{text}</span>;
+        return <span key={i} style={{ marginRight:5 }}>
+          <HoverWord word={text} role={role} S={S} onSave={onSave} color={r.color || T.text}
+            style={{ fontWeight: role==="vfin"?700:500 }} />
+        </span>;
       })}
     </span>
   );
@@ -541,6 +722,8 @@ function LevelBadge({ level }) {
     border:`1px solid ${LEVEL_COLOR[level]}55`, borderRadius:3, padding:"1px 5px", letterSpacing:.5, flexShrink:0 }}>{level}</span>;
 }
 
-Object.assign(window, { CLUSTERS, NODE_INDEX, LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName,
-  ROLES, roleMeaning, CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
+Object.assign(window, { CLUSTERS, NODE_INDEX, GRAM_MAPS, setActiveMap, hasMapFor,
+  LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL,
+  ROLES, roleMeaning, roleLabel, lookupWord, HoverWord, cleanWord,
+  CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
   USAGE, useUsage, llmCall, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments, UI, UI_STRINGS, UI_EXTRA, applyLang, LUCY_BTN_KEYS, mdInline, Tokens, LevelBadge });
