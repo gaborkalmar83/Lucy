@@ -15,8 +15,9 @@ const DEV = process.argv.includes('--dev');
 
 // Load order matters: each file attaches to window for the next one.
 const PLAIN = ['data/clusters-a.js', 'data/clusters-b.js', 'data/clusters-c.js', 'data/clusters-d.js',
-  'data/grammar-en.js', 'data/grammar-hu.js', 'data/grammar-hu2.js', 'i18n.js'];
-const JSX = ['core.jsx', 'store.jsx', 'maptrans.jsx', 'views.jsx', 'voice.jsx', 'lab.jsx', 'lucy.jsx', 'shell.jsx'];
+  'data/grammar-en.js', 'data/grammar-hu.js', 'data/grammar-hu2.js', 'i18n.js', 'vault.js'];
+const JSX = ['core.jsx', 'store.jsx', 'maptrans.jsx', 'views.jsx', 'voice.jsx', 'lab.jsx', 'lucy.jsx',
+  'handoff.jsx', 'shell.jsx'];
 
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 
@@ -224,8 +225,23 @@ async function main() {
       { name: 'Review', url: './#/review' },
       { name: 'Lucy', url: './#/lucy' },
       { name: 'Reader', url: './#/reader' }
-    ]
+    ],
+    // Android's answer to the desktop extension: once installed, LinguaMap shows
+    // up in Chrome's share sheet, so "Share → LinguaMap" sends an article or a
+    // selection straight into the Reader. GET keeps it a static site.
+    share_target: {
+      action: './',
+      method: 'GET',
+      params: { title: 'title', text: 'text', url: 'url' }
+    }
   }, null, 2));
+
+  // Extension icons, drawn by the same routine as the app's.
+  const extDir = path.join(ROOT, 'extension');
+  if (fs.existsSync(extDir)) {
+    fs.writeFileSync(path.join(extDir, 'icon-48.png'), drawIcon(48));
+    fs.writeFileSync(path.join(extDir, 'icon-128.png'), drawIcon(128));
+  }
 
   // Precache list: everything needed to run with no network.
   const fonts = fs.readdirSync(path.join(OUT, 'assets', 'fonts')).map(f => 'assets/fonts/' + f);

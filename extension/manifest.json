@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "LinguaMap — send to Lucy",
+  "version": "1.0.0",
+  "description": "Right-click any page, selection or word to send it to LinguaMap: read it, break it down, discuss it with Lucy, or save it as vocabulary.",
+  "permissions": ["contextMenus", "storage", "scripting", "activeTab"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "background.js" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "action": { "default_title": "LinguaMap", "default_popup": "popup.html" },
+  "icons": { "48": "icon-48.png", "128": "icon-128.png" }
+}

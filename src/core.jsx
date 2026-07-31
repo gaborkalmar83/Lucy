@@ -157,6 +157,8 @@ const DEFAULT_SETTINGS = {
   dailyGoal:20,                                // SRS cards/day
   reduceMotion:false,
   uiLang:"",                                   // interface language ("" = follow the primary explanation language)
+  profiles:{},                                 // per-provider model/endpoint memory
+  lucyWide:false,                              // Lucy chat uses the full window width
   readerProxy:"https://r.jina.ai/",            // used to fetch article text past CORS
   systemExtra:"",                              // appended to every system prompt
   debug:false,                                 // show timing / tokens / tok-per-sec
@@ -181,16 +183,56 @@ const DEFAULT_SETTINGS = {
   }
 };
 const DONATE_URL = "https://buymeacoffee.com/gaborkalmar";
+
 function loadSettings(){
   try {
     const saved = JSON.parse(localStorage.getItem("dgs2")||"{}");
-    return { ...DEFAULT_SETTINGS, ...saved,
+    // API keys live in the encrypted vault, not in this blob — put them back.
+    return Vault.inject({ ...DEFAULT_SETTINGS, ...saved,
       lucy:{ ...DEFAULT_SETTINGS.lucy, ...(saved.lucy||{}) },
       speak:{ ...DEFAULT_SETTINGS.speak, ...(saved.speak||{}) },
-      voice:{ ...DEFAULT_SETTINGS.voice, ...(saved.voice||{}) } };
+      profiles:{ ...(saved.profiles||{}) },
+      voice:{ ...DEFAULT_SETTINGS.voice, ...(saved.voice||{}) } });
   } catch(e){ return { ...DEFAULT_SETTINGS }; }
 }
-function saveSettings(s){ try { localStorage.setItem("dgs2", JSON.stringify(s)); } catch(e){} }
+function saveSettings(s){
+  try { localStorage.setItem("dgs2", JSON.stringify(Vault.absorb(stampProfile(s)))); } catch(e){}
+}
+
+// ── Per-provider profiles ───────────────────────────────────────────────────
+// Model, endpoint and deployment are provider-specific but were stored in one
+// shared slot, so moving OpenAI → Azure → back left the OpenAI model behind.
+// Each provider now keeps its own settings, restored on the way back. Keys are
+// already per-provider fields and live in the vault; only the rest is here.
+const PROFILE_FIELDS = {
+  builtin:    ["model"],
+  anthropic:  ["model"],
+  openai:     ["model"],
+  openrouter: ["model", "orTier"],
+  azure:      ["model", "azureEndpoint", "azureDeployment", "azureApiVersion"],
+  local:      ["model", "localUrl", "localModel"]
+};
+const profileFields = (id) => PROFILE_FIELDS[id] || ["model"];
+
+// Called on every save, so the active provider's profile is always current
+// without any explicit "remember this" step.
+function stampProfile(s){
+  const profiles = { ...(s.profiles || {}) };
+  const cur = {};
+  profileFields(s.provider).forEach(f => { cur[f] = s[f]; });
+  profiles[s.provider] = cur;
+  return { ...s, profiles };
+}
+// Switching provider: stash what is on screen, then restore that provider's own
+// last-used configuration.
+function switchProvider(S, id){
+  const stamped = stampProfile(S);
+  const saved = stamped.profiles[id];
+  const next = { ...stamped, provider:id };
+  if (saved) profileFields(id).forEach(f => { if (saved[f] !== undefined) next[f] = saved[f]; });
+  else { const p = PROVIDERS.find(x => x.id === id); next.model = (p && p.models[0]) || S.model; }
+  return next;
+}
 
 const PROVIDERS = [
   { id:"builtin",    name:"Built-in Claude (no key)", models:["claude-sonnet-4-5","claude-haiku-4-5"] },
@@ -607,6 +649,21 @@ const UI_EXTRA = {
     drillLucy:"Drill with Lucy", customPrompt:"Custom instructions",
     customPromptNote:"Added to every request on top of the app's own instructions — useful for things like \"always compare with German\" or \"keep examples about cooking\". It cannot override the output format the app depends on.",
     debugMode:"Debug readout", debugNote:"Shows response time, tokens and tokens-per-second for the last call in the bottom bar.",
+    handoffReader:"Sent to Reader", handoffLab:"Sent to Sentence Lab",
+    handoffLucy:"Sent to Lucy", handoffVocab:"Saved to vocabulary",
+    keySecurity:"Key security", keyEncrypted:"Encrypted on this device",
+    keyPassProtected:"Protected by your passphrase",
+    keyPlain:"Not encrypted — this page is not on a secure origin",
+    keyDeviceNote:"Keys are stored as AES-GCM ciphertext. The encryption key is held by the browser and cannot be read back by any script, so nothing readable ever reaches disk. Code running on this page can still ask the browser to decrypt — for a shared computer, add a passphrase.",
+    keyPassNote:"Keys are unreadable without your passphrase, even to someone holding this whole browser profile. You will be asked for it each time the app starts. There is no recovery: forget it and the keys have to be entered again.",
+    keyPlainNote:"AES encryption needs a secure origin (https, or localhost). Open the app over https to get encrypted key storage.",
+    keySetPass:"Add a passphrase", keyRemovePass:"Remove passphrase", keyPurge:"Delete stored keys",
+    keyPassPlaceholder:"Passphrase (6+ characters)", keyUnlock:"Unlock", keyUnlockTitle:"Unlock your API keys",
+    keyUnlockNote:"Your keys are encrypted with a passphrase. Everything else — grammar map, vocabulary, progress — is already loaded.",
+    keyWrongPass:"That passphrase does not match.", keySkip:"Continue without keys",
+    keyPurgeConfirm:"Delete every stored API key from this device?",
+    lucyWide:"Widescreen", lucyNarrow:"Narrow column",
+    perProviderNote:"Model and endpoint are remembered per provider, so switching back restores what you had.",
     mapLanguage:"Grammar map language", mapAuthored:"written in this language",
     mapTranslate:"Translate map", 
     mapTranslateNote:"The {lang} map is written in English. Any other explanation language is translated once by your model and cached in this browser forever — it is never re-fetched and never leaves your device.",

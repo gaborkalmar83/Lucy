@@ -489,7 +489,7 @@ function ReaderRow({ sentence, idx, S, row, onRun, nav, setLabInput, setLucySeed
   );
 }
 
-function Reader({ S, nav, setLabInput, setLucySeed }) {
+function Reader({ S, nav, setLabInput, setLucySeed, handoff, onHandoffDone }) {
   const T = React.useContext(ThemeCtx);
   const mobile = useMedia("(max-width: 820px)");
   const [text, setText] = usePersistent(KEYS.readerText, "");
@@ -505,6 +505,19 @@ function Reader({ S, nav, setLabInput, setLucySeed }) {
 
   const sentences = React.useMemo(() => sentencesOf(text), [text]);
   React.useEffect(() => { setRows({}); setBulk(null); }, [text]);   // new text → drop cached rows
+
+  // An article arriving from the extension or the phone's share sheet. It lands
+  // in the edit box rather than straight in a reading session, so the menus and
+  // cookie banners that come with any scraped page can be trimmed first — the
+  // same behaviour as fetching a URL. Works whether or not the Reader was
+  // already open, and is consumed once so revisiting the tab does not reopen it.
+  React.useEffect(() => {
+    if (!handoff) return;
+    setText(jget(KEYS.readerText, ""));
+    setUrl(jget(KEYS.readerUrl, ""));
+    setEditing(true);
+    onHandoffDone && onHandoffDone();
+  }, [handoff]);
 
   const runRow = React.useCallback(async (idx, wantRoles) => {
     const sentence = sentences[idx];

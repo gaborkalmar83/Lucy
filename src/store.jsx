@@ -172,13 +172,19 @@ const VOICE_SECRETS = ["azureKey", "openaiKey"];
 function exportAll(includeKeys) {
   const data = { _app:"linguamap", _version:3, _exported:new Date().toISOString(), _keysIncluded: !!includeKeys };
   BACKUP_KEYS.forEach(k => { const v = localStorage.getItem(k); if (v != null) data[k] = v; });
-  if (!includeKeys && typeof data[KEYS.settings] === "string") {
+  if (typeof data[KEYS.settings] === "string") {
     try {
       const s = JSON.parse(data[KEYS.settings]);
-      SECRET_FIELDS.forEach(f => { if (s[f]) s[f] = ""; });
-      // Voice mode keeps its own credentials in a nested object.
-      if (s.voice) VOICE_SECRETS.forEach(f => { if (s.voice[f]) s.voice[f] = ""; });
-      data[KEYS.settings] = JSON.stringify(s);
+      if (includeKeys) {
+        // Stored settings no longer hold the keys — they come out of the vault,
+        // and only on an explicit opt-in.
+        data[KEYS.settings] = JSON.stringify(Vault.inject(s));
+      } else {
+        SECRET_FIELDS.forEach(f => { if (s[f]) s[f] = ""; });
+        // Voice mode keeps its own credentials in a nested object.
+        if (s.voice) VOICE_SECRETS.forEach(f => { if (s.voice[f]) s.voice[f] = ""; });
+        data[KEYS.settings] = JSON.stringify(s);
+      }
     } catch(e) { delete data[KEYS.settings]; }   // unparseable → drop rather than risk it
   }
   return data;
@@ -189,12 +195,17 @@ function importAll(obj) {
   let existing = {};
   try { existing = JSON.parse(localStorage.getItem(KEYS.settings) || "{}"); } catch(e){}
   BACKUP_KEYS.forEach(k => { if (typeof obj[k] === "string") localStorage.setItem(k, obj[k]); });
-  if (!obj._keysIncluded && typeof obj[KEYS.settings] === "string") {
+  if (typeof obj[KEYS.settings] === "string") {
     try {
       const s = JSON.parse(localStorage.getItem(KEYS.settings) || "{}");
-      SECRET_FIELDS.forEach(f => { if (!s[f] && existing[f]) s[f] = existing[f]; });
-      if (s.voice && existing.voice) VOICE_SECRETS.forEach(f => { if (!s.voice[f] && existing.voice[f]) s.voice[f] = existing.voice[f]; });
-      localStorage.setItem(KEYS.settings, JSON.stringify(s));
+      // A backup carrying keys hands them to the vault, so they are encrypted
+      // the moment they land rather than sitting in the settings blob.
+      if (obj._keysIncluded) localStorage.setItem(KEYS.settings, JSON.stringify(Vault.absorb(s)));
+      else {
+        SECRET_FIELDS.forEach(f => { if (!s[f] && existing[f]) s[f] = existing[f]; });
+        if (s.voice && existing.voice) VOICE_SECRETS.forEach(f => { if (!s.voice[f] && existing.voice[f]) s.voice[f] = existing.voice[f]; });
+        localStorage.setItem(KEYS.settings, JSON.stringify(s));
+      }
     } catch(e){}
   }
   return true;
@@ -207,7 +218,12 @@ function downloadBackup(includeKeys) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
-function clearAllData(){ BACKUP_KEYS.forEach(k => localStorage.removeItem(k)); }
+// Async because the encrypted vault has to be emptied too — callers reload only
+// once that has actually happened.
+function clearAllData(){
+  BACKUP_KEYS.forEach(k => localStorage.removeItem(k));
+  return Vault.purge().catch(() => {});
+}
 
 // ── Speech: output (TTS) and input (STT) ─────────────────────────────────────
 const BCP47 = { nl:"nl-NL", de:"de-DE", fr:"fr-FR", es:"es-ES", it:"it-IT", pt:"pt-PT", sv:"sv-SE",

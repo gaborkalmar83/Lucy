@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LinguaMap</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 13px/1.5 system-ui, sans-serif; width: 250px; margin: 0; padding: 12px;
+         background:#0b1220; color:#e2e8f0; }
+  .t { font-weight:800; font-size:14px; margin-bottom:2px; }
+  .sel { color:#94a3b8; font-size:11.5px; margin-bottom:10px; min-height:15px;
+         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  button { display:block; width:100%; text-align:left; padding:8px 10px; margin-bottom:6px;
+           font-size:12.5px; border-radius:8px; border:1px solid #1e293b; background:#111c33;
+           color:#e2e8f0; cursor:pointer; }
+  button:hover { border-color:#38bdf8; }
+  button:disabled { opacity:.4; cursor:default; }
+  .link { background:none; border:none; color:#94a3b8; font-size:11.5px; padding:4px 0; }
+</style>
+</head>
+<body>
+  <div class="t">LinguaMap</div>
+  <div class="sel" id="sel">whole page</div>
+  <button id="article">📖 Send to Reader</button>
+  <button id="sentence">🧪 Send to Sentence Lab</button>
+  <button id="discuss">💬 Discuss with Lucy</button>
+  <button id="voice">🎙️ Discuss with Lucy (voice)</button>
+  <button id="word">🗂️ Save word to vocabulary</button>
+  <button id="opts" class="link">Settings…</button>
+  <script src="popup.js"></script>
+</body>
+</html>

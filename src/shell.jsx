@@ -661,6 +661,59 @@ function VoiceSettings({ S, setS, T, inp, inp2 }) {
   );
 }
 
+// What actually happens to an API key on this device, said plainly, plus the
+// one control that changes the answer: a passphrase.
+function KeySecurity({ T, inp }) {
+  const [st, setSt] = React.useState(() => Vault.state());
+  const [pw, setPw] = React.useState("");
+  const [adding, setAdding] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const refresh = () => setSt(Vault.state());
+
+  const status = st.mode === "plain" ? UI.keyPlain : st.hasPass ? UI.keyPassProtected : UI.keyEncrypted;
+  const note = st.mode === "plain" ? UI.keyPlainNote : st.hasPass ? UI.keyPassNote : UI.keyDeviceNote;
+  const colour = st.mode === "plain" ? "#f59e0b" : st.hasPass ? "#22c55e" : T.accent;
+
+  const apply = async () => {
+    setErr(null);
+    try { await Vault.setPassphrase(pw); setPw(""); setAdding(false); refresh(); }
+    catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div style={{ marginTop:14, padding:"12px 13px", borderRadius:10, border:`1px solid ${T.border}`, background:T.panel2 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, fontWeight:700, color:T.text }}>
+        <span>{st.mode === "plain" ? "⚠" : "🔒"}</span>{UI.keySecurity}
+        <span style={{ marginLeft:"auto", fontSize:11, fontWeight:600, color:colour }}>{status}</span>
+      </div>
+      <div style={{ fontSize:10.5, color:T.faint, lineHeight:1.55, marginTop:7 }}>{note}</div>
+      {st.mode !== "plain" && (
+        <div style={{ display:"flex", gap:7, flexWrap:"wrap", marginTop:10 }}>
+          {!st.hasPass && !adding && (
+            <button onClick={() => setAdding(true)} style={{ ...btn(T), fontSize:11.5 }}>🔑 {UI.keySetPass}</button>
+          )}
+          {st.hasPass && (
+            <button onClick={async () => { await Vault.clearPassphrase(); refresh(); }}
+              style={{ ...btn(T), fontSize:11.5 }}>{UI.keyRemovePass}</button>
+          )}
+          <button onClick={async () => { if (confirm(UI.keyPurgeConfirm)) { await Vault.purge(); location.reload(); } }}
+            style={{ ...btn(T), fontSize:11.5, color:"#ef4444", borderColor:"#ef444455" }}>🗑 {UI.keyPurge}</button>
+        </div>
+      )}
+      {adding && (
+        <div style={{ display:"flex", gap:7, marginTop:9 }}>
+          <input type="password" value={pw} autoFocus onChange={e => setPw(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && apply()} placeholder={UI.keyPassPlaceholder}
+            style={{ ...inp, flex:1 }} />
+          <button onClick={apply} style={{ padding:"8px 14px", fontSize:12, fontWeight:700, borderRadius:8,
+            border:"none", background:T.accent, color:T.accentText, cursor:"pointer" }}>✓</button>
+        </div>
+      )}
+      {err && <div style={{ fontSize:11, color:"#ef4444", marginTop:6 }}>{err}</div>}
+    </div>
+  );
+}
+
 function Settings({ S, setS, onClose }) {
   const T = React.useContext(ThemeCtx);
   const voices = useVoices();
@@ -768,8 +821,7 @@ function Settings({ S, setS, onClose }) {
         </Field>
 
         <Field label={UI.provider}>
-          <select value={S.provider} onChange={e => { const p = PROVIDERS.find(x=>x.id===e.target.value);
-            setS({ ...S, provider:e.target.value, model: p.models[0] || S.model }); }} style={inp}>
+          <select value={S.provider} onChange={e => setS(switchProvider(S, e.target.value))} style={inp}>
             {PROVIDERS.map(p => (
               <option key={p.id} value={p.id}>
                 {p.name}{p.id === "builtin" && !builtinAvailable() ? " — not available here" : ""}
@@ -892,6 +944,9 @@ function Settings({ S, setS, onClose }) {
           </React.Fragment>
         )}
         <div style={{ fontSize:11, color:T.faint, lineHeight:1.5, marginTop:4 }}>{UI.keyNote}</div>
+        <div style={{ fontSize:11, color:T.faint, lineHeight:1.5, marginTop:6 }}>{UI.perProviderNote}</div>
+
+        <KeySecurity T={T} inp={inp} />
 
         <div style={{ height:1, background:T.border, margin:"18px 0 16px" }}></div>
 
@@ -980,7 +1035,7 @@ function Settings({ S, setS, onClose }) {
                 r.readAsText(f);
               }} />
             </label>
-            <button onClick={() => { if (confirm(UI.confirmClear)) { clearAllData(); location.reload(); } }}
+            <button onClick={() => { if (confirm(UI.confirmClear)) clearAllData().then(() => location.reload()); }}
               style={{ padding:"8px 13px", fontSize:12, borderRadius:8, border:`1px solid ${T.badBd}`,
                 background:"transparent", color:T.bad, cursor:"pointer" }}>{UI.clearAll}</button>
           </div>
@@ -1155,6 +1210,12 @@ function App() {
   // Cross-view handoffs: Reader → Lab, Reader → Lucy.
   const [labInput, setLabInput] = usePersistent(KEYS.labState + ":input", "");
   const [lucySeed, setLucySeed] = React.useState("");
+  // …and from outside the app entirely: the browser extension and the phone's
+  // share sheet both land here.
+  const [voiceRequest, setVoiceRequest] = React.useState(0);
+  const [readerHandoff, setReaderHandoff] = React.useState(null);
+  const { toast } = useHandoff({ S, nav, setLabInput, setLucySeed, setVoiceRequest,
+    bumpReader: () => setReaderHandoff({ ts: Date.now() }) });
 
   const tgt = TARGET_LANGS.find(l => l.code === S.target) || TARGET_LANGS[0];
   const mapAvailable = tgt.hasMap;
@@ -1283,10 +1344,12 @@ function App() {
           </div>
         ))}
         {view === "lab" && <SentenceLab S={S} input={labInput} setInput={setLabInput} onOpenNode={openNode} />}
-        {view === "lucy" && <Lucy S={S} setS={setS} seed={lucySeed} clearSeed={() => setLucySeed("")} onOpenNode={openNode} />}
+        {view === "lucy" && <Lucy S={S} setS={setS} seed={lucySeed} clearSeed={() => setLucySeed("")}
+          voiceRequest={voiceRequest} onOpenNode={openNode} />}
         {view === "review" && <Review S={S} nav={nav} />}
         {view === "progress" && <Progress S={S} nav={nav} onOpenNode={openNode} />}
-        {view === "reader" && <Reader S={S} nav={nav} setLabInput={setLabInput} setLucySeed={setLucySeed} />}
+        {view === "reader" && <Reader S={S} nav={nav} setLabInput={setLabInput} setLucySeed={setLucySeed}
+          handoff={readerHandoff} onHandoffDone={() => setReaderHandoff(null)} />}
         {view === "practice" && <Practice S={S} ruleId={route.arg} nav={nav} onOpenNode={openNode} />}
 
         <Drawer target={drawer} S={S} onClose={closeDrawer} onOpen={openNode}
@@ -1296,8 +1359,52 @@ function App() {
         <CommandPalette open={palette} setOpen={setPalette} S={S} nav={nav} onOpenNode={openNode}
           onSettings={() => setShowSettings(true)} />
         {mobile ? <MobileNav view={view} nav={nav} T={T} dueCount={dueCount} /> : <BottomBar S={S} dueCount={dueCount} nav={nav} />}
+        <HandoffToast msg={toast} />
       </div>
     </ThemeCtx.Provider>
   );
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+// Passphrase mode: the app is fully usable before unlocking — only the provider
+// keys are missing — so this offers a way past rather than blocking the door.
+function UnlockScreen({ onDone }) {
+  const T = THEMES.night;
+  const [pw, setPw] = React.useState("");
+  const [err, setErr] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const go = async () => {
+    setBusy(true); setErr(false);
+    const ok = await Vault.unlock(pw);
+    setBusy(false);
+    if (ok) onDone(); else setErr(true);
+  };
+  return (
+    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center",
+      padding:20, fontFamily:"'IBM Plex Sans',sans-serif" }}>
+      <div style={{ width:"min(400px,100%)", background:T.panel, border:`1px solid ${T.border}`, borderRadius:16, padding:24 }}>
+        <div style={{ fontSize:34 }}>🔒</div>
+        <div style={{ fontSize:18, fontWeight:800, color:T.text, marginTop:8 }}>{UI.keyUnlockTitle}</div>
+        <div style={{ fontSize:12, color:T.mute, lineHeight:1.6, marginTop:8 }}>{UI.keyUnlockNote}</div>
+        <input type="password" value={pw} autoFocus onChange={e => setPw(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && go()} placeholder={UI.keyPassPlaceholder}
+          style={{ width:"100%", marginTop:14, padding:"10px 13px", fontSize:14, borderRadius:9,
+            border:`1px solid ${err ? "#ef4444" : T.border}`, background:T.panel2, color:T.text, outline:"none" }} />
+        {err && <div style={{ fontSize:11.5, color:"#ef4444", marginTop:7 }}>{UI.keyWrongPass}</div>}
+        <button onClick={go} disabled={busy} style={{ width:"100%", marginTop:12, padding:"11px", fontSize:13.5, fontWeight:700,
+          borderRadius:10, border:"none", background:T.accent, color:T.accentText, cursor:busy?"wait":"pointer" }}>{UI.keyUnlock}</button>
+        <button onClick={() => { Vault.skip(); onDone(); }} style={{ width:"100%", marginTop:8, padding:"9px", fontSize:12,
+          borderRadius:10, border:"none", background:"transparent", color:T.faint, cursor:"pointer" }}>{UI.keySkip}</button>
+      </div>
+    </div>
+  );
+}
+
+function Root() {
+  const [locked, setLocked] = React.useState(() => Vault.locked());
+  return locked ? <UnlockScreen onDone={() => setLocked(false)} /> : <App />;
+}
+
+// The vault has to be open (or known to be locked) before the first render, or
+// App would start with empty keys and immediately show the setup prompt.
+Vault.init().catch(() => {}).then(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+});

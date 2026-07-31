@@ -131,6 +131,27 @@ It also reports **model usage**: tokens in and out, calls and tokens per second
 broken down by provider and model, over the last 24 hours, 7 days or 30 days —
 so you can see what a given model actually costs you.
 
+### 🧩 Send anything from the web straight in
+
+Reading something interesting in another tab? Right-click it.
+
+- **Send this page to Reader** — the article text is extracted and lands in the
+  Reader, ready to work through sentence by sentence
+- **Send sentence to Sentence Lab** — a selected sentence goes straight to a
+  full grammatical breakdown
+- **Discuss with Lucy** — Lucy summarises the passage at your level and asks you
+  about it, in your target language. Or **(voice)**, and you talk it through
+- **Save word to vocabulary** — a selected word is looked up and dropped into
+  your review queue
+
+Install the browser extension from [`extension/`](extension/) — see
+[its README](extension/README.md). It holds no API keys and calls no model: it
+hands text to your LinguaMap tab, which uses the provider you already set up.
+
+**On Android**, where Chrome has no extensions, install LinguaMap to your home
+screen and it appears in the share sheet instead — Share → LinguaMap does the
+same thing.
+
 ### And throughout
 
 - **Two explanation languages at once.** Set a second language (say Hungarian
@@ -147,6 +168,12 @@ so you can see what a given model actually costs you.
   English; pick any other language and it is translated once by your model and
   cached in your browser forever — never re-fetched, never leaves your device
 - The word-roles bar can display in either of your explanation languages
+- **Widescreen mode in Lucy** — a toggle in the chat header; on a big monitor the
+  conversation uses the full window instead of a narrow column, while the message
+  bubbles keep a readable line length
+- **Every provider remembers its own setup.** Model, endpoint, deployment and
+  API version are stored per provider, so hopping from OpenAI to Azure and back
+  restores exactly what you had rather than resetting you to a default
 - **Custom instructions** in Settings, added to every request (e.g. "always
   compare with German") without breaking the app's own output format
 - **Debug readout** showing response time, tokens and tokens-per-second
@@ -297,18 +324,44 @@ it into a Claude artifact. Same features, same links.
 ## Privacy
 
 - No account, no server, no analytics, no trackers, no third-party scripts.
-- Your vocabulary, review schedule, progress and API keys live in your browser's
-  local storage and nowhere else.
+- Your vocabulary, review schedule and progress live in your browser's local
+  storage and nowhere else.
 - The only outbound request the app makes is to the AI provider you chose.
 - Model replies are escaped, never injected as HTML, so a bad reply can't run
   code or read your key.
 - A Content-Security-Policy restricts scripts, styles, images and fonts to the
   app's own origin.
 
-Worth knowing: with a no-server app, calls to Anthropic/OpenAI send your key
-straight from the browser, so it's visible in devtools. Use a key with a
-spending cap. On a shared computer, prefer OpenRouter with a limit, or a local
-model.
+### How your API keys are stored
+
+Keys are **encrypted at rest**, not kept as plain text. They are held as AES-GCM
+ciphertext; the settings you can inspect in devtools contain empty key fields.
+Two modes, and the difference is worth understanding:
+
+**Encrypted on this device** (default, automatic). The encryption key is a
+non-extractable key held by the browser itself — no script can read its bytes,
+so it cannot be copied out, and nothing readable ever reaches disk. This defends
+against anything that *reads* storage: a dumped profile, a synced backup, a
+shared screen, a stray bookmarklet.
+
+**Protected by a passphrase** (Settings → Key security → *Add a passphrase*).
+The key is derived from your passphrase and exists only while the app is open.
+Without the passphrase the stored keys are unreadable to anyone — including
+someone holding the entire browser profile. You are asked for it each time the
+app starts, and the app still runs if you skip it; you just have no provider
+until you unlock. **There is no recovery.** Forget it and the keys must be
+re-entered.
+
+Said plainly, because it matters: no browser-only app can hide a key from its
+own page. While the app is running it can decrypt, and a request to Anthropic or
+OpenAI sends the key from your browser, where devtools can see it. Encryption at
+rest raises the floor; it does not make a shared or compromised machine safe.
+Use a key with a spending cap. On a shared computer, add a passphrase — or
+prefer OpenRouter with a limit, or a local model that needs no key at all.
+
+Backups never contain keys unless you tick the box, and a backup that does
+carry them hands them to the vault on import rather than leaving them lying in
+settings. *Delete stored keys* in Settings wipes them from the device.
 
 ---
 
@@ -344,13 +397,20 @@ framework tooling, no bundler config — one script does everything.
 
 ```
 src/
-  data/clusters-{a,b,c}.js   Dutch grammar data (65 rules)
+  data/clusters-{a..d}.js    Dutch grammar data (75 rules)
+  data/grammar-{en,hu*}.js   English and Hungarian grammar maps
+  i18n.js                    static interface strings, 12 languages
+  vault.js                   encrypted API-key storage (AES-GCM)
   core.jsx                   themes, languages, i18n, LLM providers, usage
   store.jsx                  persistence, routing, spaced repetition, speech
+  maptrans.jsx               on-demand grammar-map translation, cached
   views.jsx                  Review · Progress · Reader · Practice · palette
+  voice.jsx                  realtime speech, voice panel
   lab.jsx                    Sentence Lab
   lucy.jsx                   conversational tutor
+  handoff.jsx                inbound content: extension, share sheet, links
   shell.jsx                  app shell, map, drawer, settings, navigation
+extension/                   browser extension (right-click → send to app)
 tools/build.mjs              build script (site + standalone + service worker)
 ```
 

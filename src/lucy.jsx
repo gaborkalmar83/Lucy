@@ -105,7 +105,7 @@ function ClickableLine({ text, S, onSave }) {
 function LucyMsg({ m, S, onSave, onOpenNode }) {
   const T = React.useContext(ThemeCtx);
   if (m.role === "user") return (
-    <div style={{ alignSelf:"flex-end", maxWidth:"85%", padding:"10px 14px", borderRadius:"14px 14px 4px 14px",
+    <div style={{ alignSelf:"flex-end", maxWidth:"min(85%, 900px)", padding:"10px 14px", borderRadius:"14px 14px 4px 14px",
       background:T.accent, color:T.accentText, fontSize:14, lineHeight:1.55, whiteSpace:"pre-wrap" }}>{m.content}</div>
   );
   const renderMd = (s) => {
@@ -164,7 +164,7 @@ function LucyMsg({ m, S, onSave, onOpenNode }) {
   });
   flushTable("end");
   return (
-    <div style={{ alignSelf:"flex-start", maxWidth:"88%", padding:"12px 15px", borderRadius:"14px 14px 14px 4px",
+    <div style={{ alignSelf:"flex-start", maxWidth:"min(88%, 980px)", padding:"12px 15px", borderRadius:"14px 14px 14px 4px",
       background:T.panel, border:`1px solid ${T.border}`, fontSize:14, lineHeight:1.6 }}>{out}</div>
   );
 }
@@ -218,7 +218,7 @@ function SidePanel({ tab, setTab, vocab, setVocab, mistakes, setMistakes, onClos
   );
 }
 
-function Lucy({ S, setS, seed, clearSeed, onOpenNode }) {
+function Lucy({ S, setS, seed, clearSeed, voiceRequest, onOpenNode }) {
   const T = React.useContext(ThemeCtx);
   const t = UI;
   const tgt = TARGET_LANGS.find(l=>l.code===S.target);
@@ -340,6 +340,10 @@ Keep each turn to a few sentences and end by inviting the learner to speak.${V.i
     if (seed) { send(seed); clearSeed && clearSeed(); }
   }, [seed]);
 
+  // "Discuss with Lucy (voice)" from the extension: open the voice panel as the
+  // seeded conversation starts, so it is a spoken discussion from the first turn.
+  React.useEffect(() => { if (voiceRequest) setVoiceOpen(true); }, [voiceRequest]);
+
   const exportTranscript = () => {
     const md = msgs.map(m => (m.role==="user"?"**You:** ":"**Lucy:** ")+m.content).join("\n\n");
     const blob = new Blob(["# Lucy session — "+tgt.name+"\n\n"+md], { type:"text/markdown" });
@@ -355,7 +359,7 @@ Keep each turn to a few sentences and end by inviting the learner to speak.${V.i
   );
 
   return (
-    <div style={{ maxWidth:820, margin:"0 auto", padding:"18px 20px 10px", display:"flex", flexDirection:"column",
+    <div style={{ maxWidth: S.lucyWide ? 1600 : 820, margin:"0 auto", padding:"18px 20px 10px", display:"flex", flexDirection:"column",
       height:"calc(100dvh - 150px)", minHeight:360 }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap", paddingBottom:12, borderBottom:`1px solid ${T.border}` }}>
         <span style={{ fontSize:18, fontWeight:800, color:T.text }}>💬 Lucy <span style={{ fontSize:13, color:T.faint, fontWeight:500 }}>· {tgt.flag} {tgt.name}</span></span>
@@ -377,6 +381,15 @@ Keep each turn to a few sentences and end by inviting the learner to speak.${V.i
               background: S.speak.auto ? T.accent+"22" : T.panel, color: S.speak.auto ? T.accent : T.mute, cursor:"pointer" }}>
             {S.speak.auto ? "🔊" : "🔇"}</button>
         )}
+        {/* Lucy is a reading surface as much as a chat: on a wide monitor the
+            820px column wastes most of the screen, but a full-width line is hard
+            to read, so the bubbles keep their own measure. */}
+        <button onClick={() => setS({ ...S, lucyWide: !S.lucyWide })}
+          title={S.lucyWide ? UI.lucyNarrow : UI.lucyWide}
+          style={{ padding:"5px 9px", fontSize:11, borderRadius:7, cursor:"pointer",
+            border:`1px solid ${S.lucyWide ? T.accent : T.border}`,
+            background: S.lucyWide ? T.accent+"22" : T.panel, color: S.lucyWide ? T.accent : T.mute }}>
+          {S.lucyWide ? "↔" : "⇥⇤"}</button>
         {msgs.length>0 && <button onClick={exportTranscript} title="Export transcript" style={{ padding:"5px 9px", fontSize:11, borderRadius:7,
           border:`1px solid ${T.border}`, background:T.panel, color:T.mute, cursor:"pointer" }}>⬇</button>}
         {msgs.length>0 && <button onClick={() => { if (confirm(UI.newSession + "?")) { stopSpeaking(); setMsgs([]); } }}
