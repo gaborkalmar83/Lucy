@@ -63,6 +63,16 @@ const langName = (code) => (EXPLAIN_LANGS.find(l=>l.code===code) || TARGET_LANGS
 const bilingual = (S) => !!(S.bilingual && S.secondary && S.secondary !== S.primary);
 const secondLang = (S) => bilingual(S) ? S.secondary : "";
 
+// The grammar map is a different case from Lucy. The "bilingual" switch governs
+// whether Lucy WRITES every explanation twice — a choice about generated text.
+// The map is pre-written reference material, so if you named a second language
+// under "explain in", you want to read the map in it. Gating the map on the
+// bilingual opt-in meant a second language could be selected and then appear
+// nowhere at all, with Settings offering no way to fix it.
+const mapLangs = (S) => [S.primary, S.secondary]
+  .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+const mapSecond = (S) => (S.secondary && S.secondary !== S.primary) ? S.secondary : "";
+
 // Word roles: color + NL grammatical term + meanings. NO purple/violet anywhere.
 const ROLES = {
   s:    { nl:"onderwerp", en:"subject", hu:"alany", de:"Subjekt", fr:"sujet", es:"sujeto", it:"soggetto",
@@ -667,6 +677,8 @@ const UI_EXTRA = {
     lucyWide:"Widescreen", lucyNarrow:"Narrow column",
     perProviderNote:"Model and endpoint are remembered per provider, so switching back restores what you had.",
     mapLanguage:"Grammar map language", mapAuthored:"written in this language",
+    mapBuiltIn:"built into the app", mapMissingLang:"This map isn't available in {lang} yet",
+    mapMissingAction:"Translate it",
     mapTranslate:"Translate map", 
     mapTranslateNote:"The {lang} map is written in English. Any other explanation language is translated once by your model and cached in this browser forever — it is never re-fetched and never leaves your device.",
     voiceFocus:"Conversation focus", focusFlow:"Natural flow", focusGrammar:"Grammar", focusIntonation:"Pronunciation",
@@ -1009,7 +1021,7 @@ function LevelBadge({ level }) {
 }
 
 Object.assign(window, { CLUSTERS, NODE_INDEX, GRAM_MAPS, setActiveMap, hasMapFor,
-  LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL, bilingual, secondLang, uiLangOf,
+  LEVELS, LEVEL_COLOR, CEFR_ALL, TARGET_LANGS, EXPLAIN_LANGS, langName, DONATE_URL, bilingual, secondLang, mapLangs, mapSecond, uiLangOf,
   ROLES, roleMeaning, roleLabel, lookupWord, HoverWord, cleanWord,
   CLUSTER_HUES, THEMES, ThemeCtx, DEFAULT_SETTINGS, loadSettings, saveSettings, PROVIDERS,
   USAGE, useUsage, llmCall, loadUsageLog, USAGE_LOG_KEY, estTok, builtinAvailable, providerReady, fetchORModels, OR_TIERS, loadORCache, saveORCache, azureBase, fetchAzureDeployments,

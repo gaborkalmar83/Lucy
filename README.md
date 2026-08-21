@@ -166,9 +166,15 @@ same thing.
 - **Hear everything.** Any sentence, word, example or flashcard reads aloud.
 - **Speak instead of typing** in the Lab and with Lucy.
 - 17 target languages · 13 explanation languages (incl. Macedonian, Serbian and Russian) · 4 themes · CEFR levels
-- **Any explanation language for the grammar map.** The maps are authored in
-  English; pick any other language and it is translated once by your model and
-  cached in your browser forever — never re-fetched, never leaves your device
+- **Both explanation languages on the grammar map.** Pick a second language
+  under *explain in* and every cluster title, rule name, rule, reason, exception
+  and example gloss shows in both — on the cards and in the rule drawer. This is
+  independent of the *bilingual* switch, which only governs how Lucy writes
+- **Any explanation language for the grammar map.** Maps are authored in English
+  (the Dutch one also in Hungarian). Translations that ship with the app are
+  built in — no key, no wait, works offline. Anything not yet shipped is
+  translated once by your own model and cached in your browser forever. See
+  [Translating a map](#translating-a-map-into-another-language)
 - The word-roles bar can display in either of your explanation languages
 - **Widescreen mode in Lucy** — a toggle in the chat header; on a big monitor the
   conversation uses the full window instead of a narrow column, while the message
@@ -384,6 +390,43 @@ branch `main`, folder **`/docs`** → **Save**. Live a minute later at
 
 ---
 
+## Translating a map into another language
+
+The grammar maps are written in English (the Dutch one also in Hungarian). Every
+other explanation language comes from a translation, and there are two ways to
+get one.
+
+**Built in.** Translations committed to `src/data/maptrans.gen.js` ship with the
+app: no API key, no waiting, works offline, and identical on every device
+including your phone. This is where a language should end up.
+
+**Translated on your device.** If a language has not been generated yet, the map
+tells you so and Settings → *Grammar map language* offers a one-tap translation.
+It runs on your own provider, one cluster per request, and is cached in that
+browser forever — but only that browser.
+
+To generate the static version, run the translator once with any provider and
+commit the result:
+
+```bash
+LM_PROVIDER=openai LM_KEY=sk-... LM_MODEL=gpt-4o npm run translate -- --map de --lang hu
+```
+
+```bash
+LM_PROVIDER=anthropic LM_KEY=sk-ant-... npm run translate -- --all
+```
+
+`--all` covers every map × every language (~1,700 requests). It writes after each
+cluster and skips anything already present, so it is safe to interrupt and
+re-run. Then `npm run build` and commit `src/data/maptrans.gen.js`.
+
+Azure and local models work too — set `LM_ENDPOINT` (and `LM_API_VERSION` for
+Azure); a local model needs no key at all:
+
+```bash
+LM_PROVIDER=local LM_ENDPOINT=http://localhost:11434/v1 LM_MODEL=qwen2.5 npm run translate -- --all
+```
+
 ## Development
 
 ```powershell
@@ -404,6 +447,7 @@ src/
   data/grammar-hu{,2}.js     Hungarian grammar map (63 rules)
   data/grammar-de{,2}.js     German grammar map (81 rules)
   data/grammar-fi{,2}.js     Finnish grammar map (71 rules)
+  data/maptrans.gen.js       generated static map translations (committed)
   i18n.js                    static interface strings, 12 languages
   vault.js                   encrypted API-key storage (AES-GCM)
   core.jsx                   themes, languages, i18n, LLM providers, usage
@@ -417,6 +461,7 @@ src/
   shell.jsx                  app shell, map, drawer, settings, navigation
 extension/                   browser extension (right-click → send to app)
 tools/build.mjs              build script (site + standalone + service worker)
+tools/translate-maps.mjs     generates the static map translations above
 ```
 
 The browser loads `docs/`, not `src/` — always rebuild after editing.

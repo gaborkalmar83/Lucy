@@ -17,7 +17,7 @@ const DEV = process.argv.includes('--dev');
 const PLAIN = ['data/clusters-a.js', 'data/clusters-b.js', 'data/clusters-c.js', 'data/clusters-d.js',
   'data/grammar-en.js', 'data/grammar-hu.js', 'data/grammar-hu2.js',
   'data/grammar-de.js', 'data/grammar-de2.js', 'data/grammar-fi.js', 'data/grammar-fi2.js',
-  'i18n.js', 'vault.js'];
+  'data/maptrans.gen.js', 'i18n.js', 'vault.js'];
 const JSX = ['core.jsx', 'store.jsx', 'maptrans.jsx', 'views.jsx', 'voice.jsx', 'lab.jsx', 'lucy.jsx',
   'handoff.jsx', 'shell.jsx'];
 

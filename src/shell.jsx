@@ -1,7 +1,10 @@
 // Dutch Grammar Studio v2 — map view, drawer, dropdowns, settings, bottom bar, app shell
 
-function NodeCard({ node, onOpen, lang }) {
+function NodeCard({ node, onOpen, lang, sec }) {
   const T = React.useContext(ThemeCtx);
+  // The second explanation language sits under the first rather than beside it:
+  // rule names get long, and two of them on one line wraps badly on a phone.
+  const second = sec && node["label_" + sec];
   return (
     <button onClick={() => onOpen(node.id)} style={{ display:"flex", alignItems:"center", gap:8, width:"100%",
       textAlign:"left", padding:"8px 10px", border:"none", borderTop:`1px solid ${T.border}`, background:"transparent",
@@ -9,14 +12,17 @@ function NodeCard({ node, onOpen, lang }) {
       onMouseEnter={e => e.currentTarget.style.background=T.chip+"66"}
       onMouseLeave={e => e.currentTarget.style.background="transparent"}>
       <LevelBadge level={node.level} />
-      <span style={{ flex:1, fontSize:13, color:T.text, fontWeight:500 }}>{node["label_"+lang] || node.label_en}</span>
+      <span style={{ flex:1, minWidth:0 }}>
+        <span style={{ display:"block", fontSize:13, color:T.text, fontWeight:500 }}>{node["label_"+lang] || node.label_en}</span>
+        {second && <span style={{ display:"block", fontSize:11.5, color:T.faint, fontStyle:"italic", marginTop:1 }}>{second}</span>}
+      </span>
       {node.links && <span style={{ fontSize:10, color:T.faint }}>↔</span>}
       <span style={{ fontSize:12, color:T.faint }}>›</span>
     </button>
   );
 }
 
-function ClusterCard({ cluster, levelCap, onOpen, onOpenExc, query, lang }) {
+function ClusterCard({ cluster, levelCap, onOpen, onOpenExc, query, lang, sec }) {
   const T = React.useContext(ThemeCtx);
   const hue = CLUSTER_HUES[cluster.color];
   const capIdx = levelCap === "all" ? 99 : LEVELS.indexOf(levelCap);
@@ -33,9 +39,12 @@ function ClusterCard({ cluster, levelCap, onOpen, onOpenExc, query, lang }) {
           <span style={{ width:9, height:9, borderRadius:99, background:hue, boxShadow:`0 0 10px ${hue}` }}></span>
           <span style={{ fontSize:15, fontWeight:800, color:T.text, letterSpacing:-.3 }}>{cluster["title_"+lang] || cluster.title_en}</span>
         </div>
+        {sec && cluster["title_"+sec] && (
+          <div style={{ fontSize:12.5, color:T.mute, fontStyle:"italic", marginTop:2 }}>{cluster["title_"+sec]}</div>
+        )}
         <div style={{ fontSize:11, color:T.faint, marginTop:3, fontFamily:"'JetBrains Mono',monospace" }}>{cluster["blurb_"+lang] || cluster.blurb_en}</div>
       </div>
-      <div>{nodes.map(n => <NodeCard key={n.id} node={n} onOpen={onOpen} lang={lang} />)}</div>
+      <div>{nodes.map(n => <NodeCard key={n.id} node={n} onOpen={onOpen} lang={lang} sec={sec} />)}</div>
       {excs.length > 0 && (
         <div style={{ borderTop:`1px dashed ${T.bad}55`, padding:"6px 0" }}>
           {excs.map((e,i) => (
@@ -43,7 +52,10 @@ function ClusterCard({ cluster, levelCap, onOpen, onOpenExc, query, lang }) {
               textAlign:"left", padding:"7px 10px", border:"none", background:"transparent", cursor:"pointer" }}>
               <span style={{ fontSize:10, fontWeight:700, color:T.bad, fontFamily:"'JetBrains Mono',monospace",
                 border:`1px solid ${T.bad}55`, borderRadius:3, padding:"1px 5px" }}>⚠</span>
-              <span style={{ flex:1, fontSize:12.5, color:T.bad }}>{e["title_"+lang] || e.title_en}</span>
+              <span style={{ flex:1, minWidth:0 }}>
+                <span style={{ display:"block", fontSize:12.5, color:T.bad }}>{e["title_"+lang] || e.title_en}</span>
+                {sec && e["title_"+sec] && <span style={{ display:"block", fontSize:11, color:T.bad, opacity:.75, fontStyle:"italic" }}>{e["title_"+sec]}</span>}
+              </span>
               <span style={{ fontSize:12, color:T.faint }}>›</span>
             </button>
           ))}
@@ -87,7 +99,7 @@ function resolvePractice(id) {
 
 function Drawer({ target, S, onClose, onOpen, onPractice, onDrill }) {
   const T = React.useContext(ThemeCtx);
-  const lang = S.primary, sec = S.secondary;
+  const lang = S.primary, sec = mapSecond(S);
   if (!target) return null;
   const pick = (o, k) => o[k+"_"+lang] || o[k+"_en"];
   const pickSec = (o, k) => sec && o[k+"_"+sec];
@@ -168,7 +180,9 @@ function Drawer({ target, S, onClose, onOpen, onPractice, onDrill }) {
               {clusterExc.map((e,i) => (
                 <div key={i} style={{ padding:"10px 12px", borderRadius:10, background:T.badBg, border:`1px solid ${T.badBd}` }}>
                   <div style={{ fontSize:12.5, fontWeight:700, color:T.bad }}>{e["title_"+lang] || e.title_en}</div>
+                  {sec && e["title_"+sec] && <div style={{ fontSize:11.5, color:T.bad, opacity:.75, fontStyle:"italic" }}>{e["title_"+sec]}</div>}
                   <div style={{ fontSize:12.5, color:T.mute, marginTop:4, lineHeight:1.55 }}>{e["body_"+lang] || e.body_en}</div>
+                  {sec && e["body_"+sec] && <div style={{ fontSize:12, color:T.faint, marginTop:3, lineHeight:1.5, fontStyle:"italic" }}>{e["body_"+sec]}</div>}
                   {(e.examples||[]).length > 0 && (
                     <div style={{ display:"flex", flexDirection:"column", gap:6, marginTop:8 }}>
                       {e.examples.map((ex,j) => <ExampleBlock key={j} ex={ex} S={S} />)}
@@ -299,6 +313,31 @@ function ModelTools({ S, T, fetched, setFetched, onLoaded }) {
 }
 
 // The curated maps are authored in English (and Hungarian). Any other
+// A chosen explanation language that the map has no text for used to fail
+// silently — the language simply appeared nowhere, with nothing on screen
+// explaining why. This says so where you would actually notice it.
+function MapLangNotice({ S, onSettings }) {
+  const T = React.useContext(ThemeCtx);
+  const missing = mapLangs(S).filter(l => {
+    const p = mapTransProgress(S.target, l);
+    return p.total > 0 && p.done < p.total;
+  });
+  if (!missing.length) return null;
+  return (
+    <div style={{ maxWidth:1280, margin:"12px auto 0", padding:"0 16px" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap",
+        padding:"9px 13px", borderRadius:10, background:T.whyBg, border:`1px solid ${T.whyBd}` }}>
+        <span style={{ fontSize:12.5, color:T.whyText, flex:1, minWidth:180 }}>
+          {UI.mapMissingLang.replace("{lang}", missing.map(langName).join(" / "))}
+        </span>
+        <button onClick={onSettings} style={{ padding:"5px 12px", fontSize:11.5, fontWeight:700,
+          borderRadius:8, border:"none", background:T.accent, color:T.accentText, cursor:"pointer" }}>
+          {UI.mapMissingAction}</button>
+      </div>
+    </div>
+  );
+}
+
 // explanation language is translated on demand and cached here forever, so a
 // rule is paid for once and the repository carries no unverified translations.
 function MapTranslation({ S, T, inp }) {
@@ -308,7 +347,7 @@ function MapTranslation({ S, T, inp }) {
   const [err, setErr] = React.useState(null);
   const stop = React.useRef(false);
 
-  const langs = [S.primary, secondLang(S)].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+  const langs = mapLangs(S);
   const rows = langs.map(l => ({ lang: l, ...mapTransProgress(S.target, l), authored: !needsTranslation(S.target, l) }));
   const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
 
@@ -328,6 +367,9 @@ function MapTranslation({ S, T, inp }) {
             <span style={{ fontSize:12, color:T.text, minWidth:96 }}>{langName(r.lang)}</span>
             {r.authored ? (
               <span style={{ fontSize:11, color:T.good }}>✓ {UI.mapAuthored}</span>
+            ) : r.builtIn ? (
+              /* Shipped with the app: nothing to translate, nothing to reset. */
+              <span style={{ fontSize:11, color:T.good }}>✓ {UI.mapBuiltIn}</span>
             ) : r.done >= r.total && r.total > 0 ? (
               <React.Fragment>
                 <span style={{ fontSize:11, color:T.good }}>✓ {r.done}/{r.total}</span>
@@ -1186,8 +1228,10 @@ function App() {
   applyLang(uiLangOf(S));
   setActiveMap(S.target);   // point CLUSTERS / NODE_INDEX at this language's map
   // Re-apply any cached translation of this map into the explanation language.
-  React.useMemo(() => hydrateMapTranslations(S.target, S.primary), [S.target, S.primary]);
-  React.useMemo(() => { if (secondLang(S)) hydrateMapTranslations(S.target, secondLang(S)); }, [S.target, S.secondary, S.bilingual]);
+  // Every explanation language you picked, not just the primary — and not gated
+  // on the bilingual switch, which is about Lucy's generated text, not the map.
+  React.useMemo(() => { mapLangs(S).forEach(l => hydrateMapTranslations(S.target, l)); },
+    [S.target, S.primary, S.secondary]);
   const setS = (next) => { setSraw(next); saveSettings(next); };
   const T = THEMES[S.theme] || THEMES.night;
 
@@ -1327,9 +1371,10 @@ function App() {
 
         {needsSetup && <SetupNotice onSettings={() => setShowSettings(true)} onDismiss={() => setSetupDismissed(true)} />}
 
+        {view === "map" && mapAvailable && <MapLangNotice S={S} onSettings={() => setShowSettings(true)} />}
         {view === "map" && (mapAvailable ? (
           <div style={{ maxWidth:1280, margin:"0 auto", padding:"22px 16px 40px", columnWidth: mobile ? "auto" : 330, columnGap:18 }}>
-            {CLUSTERS.map(c => <ClusterCard key={c.id} cluster={c} levelCap={levelCap} query={query} lang={S.primary}
+            {CLUSTERS.map(c => <ClusterCard key={c.id} cluster={c} levelCap={levelCap} query={query} lang={S.primary} sec={mapSecond(S)}
               onOpen={openNode} onOpenExc={(cid, idx) => setDrawer({ type:"exc", cid, idx })} />)}
           </div>
         ) : (

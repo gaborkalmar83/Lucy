@@ -87,23 +87,44 @@ function applyCluster(cluster, tr, lang) {
   });
 }
 
-// Re-apply a cached translation to the in-memory map (called on every load).
+// Translations that ship with the app, generated offline and committed. These
+// cost nothing, need no key and work offline — the goal is for every language
+// to live here eventually, with the runtime path below as the fallback for
+// anything not yet generated.
+function staticTrans(mapCode, lang) {
+  const m = (window.MAP_I18N || {})[mapCode];
+  return (m && m[lang]) || null;
+}
+
+// Re-apply the shipped and cached translations to the in-memory map (called on
+// every load). Static data is applied first, then anything this browser
+// translated itself — so a locally generated cluster wins over a shipped one.
 function hydrateMapTranslations(mapCode, lang) {
   if (!needsTranslation(mapCode, lang)) return false;
-  const cache = loadMapTrans()[mapTransKey(mapCode, lang)];
-  if (!cache) return false;
   const clusters = GRAM_MAPS[mapCode] || [];
-  clusters.forEach(c => { if (cache[c.id]) applyCluster(c, cache[c.id], lang); });
+  const stat = staticTrans(mapCode, lang);
+  const cache = loadMapTrans()[mapTransKey(mapCode, lang)];
+  if (!stat && !cache) return false;
+  clusters.forEach(c => {
+    if (stat && stat[c.id]) applyCluster(c, stat[c.id], lang);
+    if (cache && cache[c.id]) applyCluster(c, cache[c.id], lang);
+  });
   return true;
 }
 
-// How much of this map is already translated into this language?
+// How much of this map is available in this language, from either source.
 function mapTransProgress(mapCode, lang) {
   const clusters = GRAM_MAPS[mapCode] || [];
   if (!clusters.length) return { done: 0, total: 0 };
-  if (!needsTranslation(mapCode, lang)) return { done: clusters.length, total: clusters.length };
+  if (!needsTranslation(mapCode, lang)) return { done: clusters.length, total: clusters.length, authored: true };
+  const stat = staticTrans(mapCode, lang) || {};
   const cache = loadMapTrans()[mapTransKey(mapCode, lang)] || {};
-  return { done: clusters.filter(c => cache[c.id]).length, total: clusters.length };
+  const statCount = clusters.filter(c => stat[c.id]).length;
+  return {
+    done: clusters.filter(c => stat[c.id] || cache[c.id]).length,
+    total: clusters.length,
+    builtIn: statCount === clusters.length      // shipped complete: nothing to do
+  };
 }
 
 // Translate the whole map, cluster by cluster, reporting progress. Safe to stop
@@ -114,7 +135,9 @@ async function translateMap(mapCode, lang, S, onProgress, shouldStop) {
   const store = loadMapTrans();
   const key = mapTransKey(mapCode, lang);
   const cache = store[key] || (store[key] = {});
-  const todo = clusters.filter(c => !cache[c.id]);
+  // Never pay to translate a cluster that already ships with the app.
+  const stat = staticTrans(mapCode, lang) || {};
+  const todo = clusters.filter(c => !cache[c.id] && !stat[c.id]);
   let done = 0;
   for (const c of todo) {
     if (shouldStop && shouldStop()) break;
