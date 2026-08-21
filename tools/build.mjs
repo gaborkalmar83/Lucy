@@ -15,7 +15,9 @@ const DEV = process.argv.includes('--dev');
 
 // Load order matters: each file attaches to window for the next one.
 const PLAIN = ['data/clusters-a.js', 'data/clusters-b.js', 'data/clusters-c.js', 'data/clusters-d.js',
-  'data/grammar-en.js', 'data/grammar-hu.js', 'data/grammar-hu2.js', 'i18n.js', 'vault.js'];
+  'data/grammar-en.js', 'data/grammar-hu.js', 'data/grammar-hu2.js',
+  'data/grammar-de.js', 'data/grammar-de2.js', 'data/grammar-fi.js', 'data/grammar-fi2.js',
+  'i18n.js', 'vault.js'];
 const JSX = ['core.jsx', 'store.jsx', 'maptrans.jsx', 'views.jsx', 'voice.jsx', 'lab.jsx', 'lucy.jsx',
   'handoff.jsx', 'shell.jsx'];
 
@@ -200,7 +202,12 @@ async function main() {
 
   // ── static site ──
   fs.writeFileSync(path.join(OUT, 'assets', 'app.js'), js);
-  fs.writeFileSync(path.join(OUT, 'assets', 'app.css'), fontCss + '\n' + BASE_CSS);
+  // app.css is served from assets/, so its font URLs resolve relative to THAT
+  // folder — "assets/fonts/x" would ask for assets/assets/fonts/x and 404.
+  // The standalone build keeps the original paths, since inlineFonts() matches
+  // on them before turning each file into a data: URI.
+  fs.writeFileSync(path.join(OUT, 'assets', 'app.css'),
+    fontCss.replace(/url\("assets\/fonts\//g, 'url("fonts/') + '\n' + BASE_CSS);
   fs.writeFileSync(path.join(OUT, 'assets', 'icon.svg'), ICON_SVG);
   fs.writeFileSync(path.join(OUT, 'assets', 'icon-192.png'), drawIcon(192));
   fs.writeFileSync(path.join(OUT, 'assets', 'icon-512.png'), drawIcon(512));

@@ -19,9 +19,18 @@ function saveMapTrans() {
 }
 const mapTransKey = (mapCode, lang) => mapCode + "|" + lang;
 
-// Languages that are already authored in the data files need no translation.
-const AUTHORED = { en: true, hu: true };
-const needsTranslation = (lang) => !AUTHORED[lang];
+// Which languages each map is actually written in. This is per map, not global:
+// the Dutch data carries hand-written Hungarian alongside the English, but the
+// English, Hungarian, German and Finnish maps are authored in English only — so
+// a Hungarian-speaking learner of German still needs the map translated.
+const AUTHORED = {
+  nl: { en: true, hu: true },
+  en: { en: true },
+  hu: { en: true },
+  de: { en: true },
+  fi: { en: true }
+};
+const needsTranslation = (mapCode, lang) => !((AUTHORED[mapCode] || { en: true })[lang]);
 
 // What one node contributes to a translation request.
 function nodePayload(n) {
@@ -80,7 +89,7 @@ function applyCluster(cluster, tr, lang) {
 
 // Re-apply a cached translation to the in-memory map (called on every load).
 function hydrateMapTranslations(mapCode, lang) {
-  if (!needsTranslation(lang)) return false;
+  if (!needsTranslation(mapCode, lang)) return false;
   const cache = loadMapTrans()[mapTransKey(mapCode, lang)];
   if (!cache) return false;
   const clusters = GRAM_MAPS[mapCode] || [];
@@ -92,7 +101,7 @@ function hydrateMapTranslations(mapCode, lang) {
 function mapTransProgress(mapCode, lang) {
   const clusters = GRAM_MAPS[mapCode] || [];
   if (!clusters.length) return { done: 0, total: 0 };
-  if (!needsTranslation(lang)) return { done: clusters.length, total: clusters.length };
+  if (!needsTranslation(mapCode, lang)) return { done: clusters.length, total: clusters.length };
   const cache = loadMapTrans()[mapTransKey(mapCode, lang)] || {};
   return { done: clusters.filter(c => cache[c.id]).length, total: clusters.length };
 }
@@ -100,7 +109,7 @@ function mapTransProgress(mapCode, lang) {
 // Translate the whole map, cluster by cluster, reporting progress. Safe to stop
 // and resume: finished clusters are cached as they complete.
 async function translateMap(mapCode, lang, S, onProgress, shouldStop) {
-  if (!needsTranslation(lang)) return { done: 0, total: 0 };
+  if (!needsTranslation(mapCode, lang)) return { done: 0, total: 0 };
   const clusters = GRAM_MAPS[mapCode] || [];
   const store = loadMapTrans();
   const key = mapTransKey(mapCode, lang);

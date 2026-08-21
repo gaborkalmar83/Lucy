@@ -309,7 +309,7 @@ function MapTranslation({ S, T, inp }) {
   const stop = React.useRef(false);
 
   const langs = [S.primary, secondLang(S)].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
-  const rows = langs.map(l => ({ lang: l, ...mapTransProgress(S.target, l), authored: !needsTranslation(l) }));
+  const rows = langs.map(l => ({ lang: l, ...mapTransProgress(S.target, l), authored: !needsTranslation(S.target, l) }));
   const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
 
   const run = async (lang) => {

@@ -6,9 +6,9 @@ Most apps tell you a sentence is wrong. This one shows you which rule you broke,
 why that rule exists, gives you drills for it, and then brings it back days later
 when you're about to forget it.
 
-**Dutch, English and Hungarian** each come with a hand-written grammar map —
-75, 41 and 63 rules. Thirteen further European languages work through the AI
-features.
+**Dutch, German, Finnish, Hungarian and English** each come with a hand-written
+grammar map — 331 rules between them. Thirteen further European languages work
+through the AI features.
 
 Everything runs in your browser — no account, no server, no tracking — and you
 plug in whichever AI model you like, including a free one or one running on your
@@ -20,13 +20,15 @@ own PC.
 
 ### 🗺️ Grammar Map — the reference that explains itself
 
-Hand-written maps for three languages:
+Hand-written maps for five languages:
 
 | Language | Rules | Covers |
 |---|---|---|
+| 🇩🇪 German | 81 in 24 clusters | the four cases, gender, adjective endings, verb-second and the verb bracket, Perfekt vs Präteritum, modals, separable verbs, *Wechselpräpositionen*, relative clauses, Konjunktiv I & II, passive, modal particles |
 | 🇳🇱 Dutch | 75 in 22 clusters | *de/het*, word order, perfect vs imperfect, modals, separable verbs, prepositions, relative clauses, modal particles |
-| 🇬🇧 English | 41 in 12 clusters | articles, tense system, perfect aspect, conditionals, phrasal verbs |
+| 🇫🇮 Finnish | 71 in 22 clusters | vowel harmony, consonant gradation, stem finding, the partitive, total vs partial objects, the local cases, possessive suffixes, the six verb types, the impersonal passive, infinitives, participles |
 | 🇭🇺 Hungarian | 63 in 17 clusters | vowel harmony, the full case system, definite vs indefinite conjugation, possession, verbal prefixes, focus, participles, causatives, derivation |
+| 🇬🇧 English | 41 in 12 clusters | articles, tense system, perfect aspect, conditionals, phrasal verbs |
 
 Every rule gives you:
 
@@ -398,7 +400,10 @@ framework tooling, no bundler config — one script does everything.
 ```
 src/
   data/clusters-{a..d}.js    Dutch grammar data (75 rules)
-  data/grammar-{en,hu*}.js   English and Hungarian grammar maps
+  data/grammar-en.js         English grammar map (41 rules)
+  data/grammar-hu{,2}.js     Hungarian grammar map (63 rules)
+  data/grammar-de{,2}.js     German grammar map (81 rules)
+  data/grammar-fi{,2}.js     Finnish grammar map (71 rules)
   i18n.js                    static interface strings, 12 languages
   vault.js                   encrypted API-key storage (AES-GCM)
   core.jsx                   themes, languages, i18n, LLM providers, usage
