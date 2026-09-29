@@ -407,8 +407,18 @@ function providerReady(S) {
   }
 }
 
+// JSON Schema helpers for structured replies. Every object is closed and every
+// listed property required, which is what the Anthropic API's structured outputs expect.
+const STR = { type:"string" };
+const TOKENS = { type:"array", items:{ type:"array", items:STR } };
+const jsonObject = (properties) => ({ type:"object", additionalProperties:false, properties, required:Object.keys(properties) });
+// Models that rejected `output_config.format` this session; they get the plain prompt from then on.
+const NO_SCHEMA = new Set();
+
 // unified LLM call → { text }
-async function llmCall(S, { system, messages, maxTokens=2000, task="" }) {
+// `schema` (optional JSON Schema): on the direct Anthropic API the reply is constrained to it
+// with structured outputs. Other providers keep the prompt's JSON instruction and the caller's parser.
+async function llmCall(S, { system, messages, maxTokens=2000, task="", schema=null }) {
   const modelName = S.provider==="local" ? (S.localModel||"local")
     : S.provider==="azure" ? (S.azureDeployment||"azure") : S.model;
   const label = S.provider + " · " + modelName;
@@ -431,7 +441,8 @@ async function llmCall(S, { system, messages, maxTokens=2000, task="" }) {
   if (S.provider === "anthropic") {
     url = "https://api.anthropic.com/v1/messages";
     headers = { "content-type":"application/json", "x-api-key":S.anthropicKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" };
-    body = { model:S.model, max_tokens:maxTokens, system, messages };
+    body = { model:S.model, max_tokens:maxTokens, system, messages,
+      ...(schema && !NO_SCHEMA.has(S.model) ? { output_config: { format: { type:"json_schema", schema } } } : {}) };
     extract = j => j.content.map(b=>b.text||"").join("");
     usageOf = j => j.usage ? [j.usage.input_tokens, j.usage.output_tokens] : null;
   } else if (S.provider === "azure") {
@@ -454,7 +465,15 @@ async function llmCall(S, { system, messages, maxTokens=2000, task="" }) {
     extract = j => j.choices[0].message.content;
     usageOf = j => j.usage ? [j.usage.prompt_tokens, j.usage.completion_tokens] : null;
   }
-  const res = await fetch(url, { method:"POST", headers, body: JSON.stringify(body) });
+  let res = await fetch(url, { method:"POST", headers, body: JSON.stringify(body) });
+  if (!res.ok && res.status === 400 && body.output_config) {
+    // Older models don't take structured outputs: remember that, and resend with the prompt alone.
+    const err = await res.text();
+    if (!/output_config|format|schema/i.test(err)) throw new Error("API 400: " + err.slice(0,200));
+    NO_SCHEMA.add(S.model);
+    delete body.output_config;
+    res = await fetch(url, { method:"POST", headers, body: JSON.stringify(body) });
+  }
   if (!res.ok) throw new Error("API " + res.status + ": " + (await res.text()).slice(0,200));
   const j = await res.json();
   const text = extract(j);
@@ -880,7 +899,9 @@ async function lookupWord(word, S) {
 Give the meaning THIS word has, and translate idiomatically into each language — never word-for-word.`;
   GLOSS_PENDING[key] = (async () => {
     try {
-      const { text } = await llmCall(S, { system: sys, maxTokens: 150, messages: [{ role:"user", content: term }] });
+      const schema = jsonObject({ base:STR, pos:{ type:"string", enum:["noun","verb","adjective","adverb","pronoun","preposition","other"] },
+        p1:STR, ...(p2 ? { p2:STR } : {}) });
+      const { text } = await llmCall(S, { system: sys, maxTokens: 150, schema, messages: [{ role:"user", content: term }] });
       const m = text.match(/\{[\s\S]*\}/);
       const j = m ? JSON.parse(m[0]) : {};
       const out = { term, base: j.base || term, pos: j.pos || "", primary: j.p1 || text.trim(), secondary: j.p2 || "" };
@@ -900,6 +921,7 @@ async function translateLine(text, S) {
   const p1 = langName(S.primary), p2 = secondLang(S) ? langName(secondLang(S)) : null;
   LINE_CACHE[key] = (async () => {
     const { text: out } = await llmCall(S, { maxTokens: 300, task: "voice-translate",
+      schema: jsonObject({ p1:STR, ...(p2 ? { p2:STR } : {}) }),
       system: `Translate the line into ${p1}${p2 ? ` and ${p2}` : ""}. Reply with ONLY compact JSON, no fences:
 {"p1":"…"${p2 ? `,"p2":"…"` : ""}}
 Translate the meaning as a native speaker of each language would say it — never word for word.`,

@@ -38,8 +38,12 @@ Respond ONLY with valid JSON, no fences:
 "violated":[{"id":"…","label":"rule name","note":"what went wrong + fix"${p2 ? `,"note2":"same note in ${p2}"` : ""}}],
 "explanation":"2-3 sentences"${p2 ? `,"explanation2":"the same 2-3 sentences in ${p2}"` : ""}}
 roles: s,vfin,vinf,o,io,prep,neg,conn,adv,refl,part,art,q,pron,adj,x. Pick 3-6 relevant applied rules; list every real violation.${p2 ? `
-BILINGUAL OUTPUT IS MANDATORY: the learner reads ${p1} and ${p2}. Every "note" MUST have a matching "note2", and "explanation" MUST have "explanation2". Write the ${p2} version as a real explanation for a ${p2} speaker — not a word-for-word translation — and mention where ${p2} works the same way or differently. Never omit a "note2", never leave one empty, above all on violated rules.` : ""}`;
-      const { text } = await llmCall(S, { system: sys, maxTokens: 2000,
+TWO EXPLANATION LANGUAGES: the learner reads ${p1} and ${p2}, so every "note" has a matching, non-empty "note2" and "explanation" has "explanation2" — violated rules included. Write the ${p2} version as a real explanation for a ${p2} speaker, not a word-for-word translation, and mention where ${p2} works the same way or differently.` : ""}`;
+      const note = jsonObject({ id:STR, label:STR, note:STR, ...(p2 ? { note2:STR } : {}) });
+      const schema = jsonObject({ verdict:{ type:"string", enum:["correct","errors","not_target_language"] }, corrected:STR,
+        tokens:TOKENS, applied:{ type:"array", items:note }, violated:{ type:"array", items:note },
+        explanation:STR, ...(p2 ? { explanation2:STR } : {}) });
+      const { text } = await llmCall(S, { system: sys, maxTokens: 2000, schema,
         messages: [{ role:"user", content: catalog + "SENTENCE: " + input.trim() }] });
       const m = text.match(/\{[\s\S]*\}/);
       if (!m) throw new Error("no json");
