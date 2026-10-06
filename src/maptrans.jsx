@@ -51,7 +51,10 @@ async function translateCluster(cluster, lang, S) {
     exceptions: (cluster.exceptions || []).map((e, i) => excPayload(cluster, e, i))
   };
   const target = (TARGET_LANGS.find(l => l.code === (S.target || "")) || {}).name || "the target language";
-  const { text } = await llmCall(S, { maxTokens: 4000, task: "map-translate",
+  const item = (...keys) => jsonObject({ ...Object.fromEntries(keys.map(k => [k, STR])), ex:{ type:"array", items:STR } });
+  const schema = jsonObject({ title:STR, blurb:STR, nodes:{ type:"array", items:item("id","label","rule","reason") },
+    exceptions:{ type:"array", items:item("id","title","body") } });
+  const { text } = await llmCall(S, { maxTokens: 4000, task: "map-translate", schema,
     system: `You translate grammar-reference material for learners of ${target} into ${langName(lang)}.
 Return ONLY the same JSON structure with every English string replaced by its ${langName(lang)} translation. Keep all "id" values byte-identical. Keep the arrays the same length and order.
 Write as a grammar book written for ${langName(lang)} speakers would: use that language's own grammatical terminology, and keep it concise and precise.

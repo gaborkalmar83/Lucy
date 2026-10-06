@@ -581,7 +581,8 @@ function VoicePanel({ S: S0, instructions, opener, onUser, onAssistant, onClose 
       push("user", heard);
       setState("thinking");
       try {
-        const { text } = await llmCall(Stext, { system: instructions, maxTokens: 500, task: "voice",
+        // `instructions` already ends with the learner's custom instructions (the realtime path needs them inline).
+        const { text } = await llmCall({ ...Stext, systemExtra: "" }, { system: instructions, maxTokens: 500, task: "voice",
           messages: [{ role:"user", content: heard }] });
         if (!loopRef.current) return;
         // Only the target-language half is spoken; the translation is for reading.

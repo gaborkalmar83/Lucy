@@ -416,7 +416,8 @@ const sentencesOf = (text) =>
 async function analyseSentence(sentence, S) {
   const tgt = TARGET_LANGS.find(l => l.code === S.target) || {};
   const p1 = langName(S.primary), p2 = secondLang(S) ? langName(secondLang(S)) : null;
-  const { text } = await llmCall(S, { maxTokens: 700, task: "reader",
+  const schema = jsonObject({ p1:STR, ...(p2 ? { p2:STR } : {}), tokens:TOKENS });
+  const { text } = await llmCall(S, { maxTokens: 700, task: "reader", schema,
     system: `You translate one ${tgt.name} sentence for a learner and label its grammar.
 Reply with ONLY compact JSON, no fences:
 {"p1":"idiomatic ${p1} translation"${p2 ? `,"p2":"idiomatic ${p2} translation"` : ""},"tokens":[["word","role"],…]}
@@ -686,7 +687,9 @@ function Practice({ S, ruleId, nav, onOpenNode }) {
         : isExc
         ? `EXCEPTION / PITFALL: ${res.exc.title_en}\n${res.exc.body_en}\nEvery item must hinge on exactly this exception.`
         : `Pick a grammar point suitable for CEFR ${S.level}.`;
-      const { text } = await llmCall(S, { maxTokens:1400,
+      const schema = jsonObject({ title:STR, items:{ type:"array",
+        items: jsonObject({ q:STR, options:{ type:"array", items:STR }, answer:STR, why:STR }) } });
+      const { text } = await llmCall(S, { maxTokens:1400, schema,
         system:`You write short grammar drills for a ${tgt.name} learner at CEFR ${S.level}. Explanations in ${langName(S.primary)}.
 Respond ONLY with valid JSON, no fences:
 {"title":"…","items":[{"q":"sentence with ___ for the blank","options":["a","b","c"],"answer":"a","why":"one line in ${langName(S.primary)}"}]}
